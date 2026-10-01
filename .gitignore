@@ -1,0 +1,17 @@
+# 构建 / 运行产物：本工作区只做迁移文档与规划，不把编译输出入库
+artifacts/
+log/
+
+# ROS 2 / colcon 通用产物
+build/
+install/
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
