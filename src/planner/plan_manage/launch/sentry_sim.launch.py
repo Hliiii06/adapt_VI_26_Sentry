@@ -103,7 +103,18 @@ def _setup(context):
     common = {"use_sim_time": use_sim_time}
     nodes = []
 
-    # 1) 全局 PCD 地图发布（含地面过滤与 z 归零，见 sentry_simulator.yaml 注释）
+    # 地图预处理参数。默认值对应"演示地图"：把 rmuc2026_field.pcd 整体下移 0.30 m
+    # 并按绝对高度删掉低处点。这是按高度切图，不是地面识别，会连带删除矮障碍，
+    # 因此默认同时发布未过滤的对照云，且不可直接带到实车。
+    map_params = {
+        "file_name": pcd_map_file,
+        "map_offset_z": float(LaunchConfiguration("map_offset_z").perform(context)),
+        "keep_z_min": float(LaunchConfiguration("keep_z_min").perform(context)),
+        "keep_z_max": float(LaunchConfiguration("keep_z_max").perform(context)),
+        "publish_raw_cloud": _as_bool(LaunchConfiguration("publish_raw_cloud").perform(context)),
+    }
+
+    # 1) 全局 PCD 地图发布（含演示用高度过滤与对照云）
     nodes.append(
         Node(
             package="map_generator",
@@ -111,7 +122,7 @@ def _setup(context):
             name="map_pub",
             namespace=NAMESPACE,
             output="screen",
-            parameters=[simulator_yaml, common, {"file_name": pcd_map_file}],
+            parameters=[simulator_yaml, common, map_params],
         )
     )
 
@@ -217,6 +228,20 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "pcd_map_file", default_value="~/pcd_map/rmuc2026_field.pcd",
                 description="用户提供的 PCD 地图路径"),
+            DeclareLaunchArgument(
+                "map_offset_z", default_value="-0.30",
+                description="演示地图：把地图整体下移，使可行驶地面落在 z=0。"
+                            "合成测试地图应设为 0.0"),
+            DeclareLaunchArgument(
+                "keep_z_min", default_value="0.0",
+                description="演示地图：删除该高度以下的点（按绝对高度切图，不是地面识别，"
+                            "会连带删除矮障碍）。合成测试地图按需设置"),
+            DeclareLaunchArgument(
+                "keep_z_max", default_value="1.5",
+                description="演示地图：删除该高度以上的点"),
+            DeclareLaunchArgument(
+                "publish_raw_cloud", default_value="true",
+                description="额外发布未过滤的对照云 /sentry_sim/global_cloud_raw"),
             DeclareLaunchArgument("keypoints_file", default_value="",
                                   description="navi_mode=2 的航点参数 YAML"),
             DeclareLaunchArgument("reference_path_file", default_value="",

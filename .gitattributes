@@ -1,0 +1,7 @@
+# 点云地图是二进制 PCD：显式标为 binary，避免被当成文本做行级 diff。
+*.pcd binary
+*.pgm binary
+*.bt binary
+
+# 上游 SCAN 源码存在混合行尾（部分文件 CRLF）。这里**不做** text=auto 归一化，
+# 以免产生与上游无关的整文件改动；改动边界见 docs/migration/implementation_report.md。

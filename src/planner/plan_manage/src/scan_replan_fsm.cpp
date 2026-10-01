@@ -80,6 +80,11 @@ namespace scan_planner
     go2_execution_frozen_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
         "planning/go2_execution_frozen", 10,
         std::bind(&SCANReplanFSM::go2ExecutionFrozenCallback, this, std::placeholders::_1));
+    // 取消是任务级操作：只清跟踪器的轨迹不足以停止任务，规划器仍会继续发布轨迹。
+    // 因此 FSM 也订阅同一取消输入，取消目标并停止发布。
+    reset_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
+        "planning/reset", 10,
+        std::bind(&SCANReplanFSM::resetCallback, this, std::placeholders::_1));
 
     bspline_pub_ = node_->create_publisher<scan_planner_msgs::msg::Bspline>("planning/bspline", 10);
     data_disp_pub_ = node_->create_publisher<scan_planner_msgs::msg::DataDisp>("planning/data_display", 100);
@@ -426,6 +431,42 @@ namespace scan_planner
     go2_execution_frozen_ = msg->data;
   }
 
+  void SCANReplanFSM::resetCallback(const std_msgs::msg::Bool::ConstSharedPtr &msg)
+  {
+    // 只置标志，实际取消在 execFSMCallback 里做，保证与状态机在同一线程、同一时刻生效。
+    if (msg->data)
+      reset_requested_ = true;
+  }
+
+  void SCANReplanFSM::resetTask()
+  {
+    // 取消任务：清除目标与已规划轨迹的时间基准，回到 WAIT_TARGET。
+    // 之后 FSM 不再发布任何 Bspline，跟踪器也就没有可执行的东西。
+    have_target_ = false;
+    have_new_target_ = false;
+    trigger_ = false;
+    need_hover_stop_ = false;
+    replan_fail_count_ = 0;
+    end_pt_.setZero();
+    end_vel_.setZero();
+    active_waypoints_.clear();
+    current_wp_ = 0;
+    // Mode 2 的 waypoint 任务由 odometryCallback 在 preset_started_ 为 false 时自动起步；
+    // 保持为 true，取消后不会自动重启（重新开始需要重启 launch）。
+    preset_started_ = true;
+
+    LocalTrajData *info = &planner_manager_->local_data_;
+    info->start_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+    info->duration_ = 0.0;
+    info->traj_id_ = 0;
+    planner_manager_->global_data_.global_duration_ = 0.0;
+
+    changeFSMExecState(WAIT_TARGET, "RESET");
+    RCLCPP_WARN(node_->get_logger(),
+                "Task cancelled: target and planned trajectory cleared; "
+                "waiting for a new goal before any further motion");
+  }
+
   void SCANReplanFSM::updateLocalTrajTimeFreeze()
   {
     const rclcpp::Time now = node_->now();
@@ -558,6 +599,13 @@ namespace scan_planner
   void SCANReplanFSM::execFSMCallback()
   {
     updateLocalTrajTimeFreeze();
+
+    if (reset_requested_)
+    {
+      reset_requested_ = false;
+      resetTask();
+      return;
+    }
 
     static int fsm_num = 0;
     fsm_num++;

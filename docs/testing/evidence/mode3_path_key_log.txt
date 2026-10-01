@@ -1,0 +1,37 @@
+# 场景 mode3_path 关键日志摘要
+# 由 scripts/summarize_launch_log.sh 从 log/scenarios/mode3_path_launch.log 提取
+
+## 生效配置
+[go2_kinematic_sim-5] [INFO] [1790868432.605667232] [sentry_sim.go2_kinematic_sim]: Holonomic kinematic simulator ready: init=(-6.00, 1.25, 0.12) yaw=0.00, limits vx=1.00 vy=1.00 wz=1.50, acc xy=1.00 yaw=2.00, cmd_timeout=0.30s
+[INFO] [1790868432.605289168] [sentry_sim.closed_loop_controller]: Omnidirectional closed-loop tracker ready: yaw_mode=hold, vx=1.00, vy=1.00, wz=1.50, odom_timeout=0.50s, trajectory age limit=0.50s (older/future trajectories are rejected)
+[INFO] [1790868432.686995039] [sentry_sim.scan_planner_node]: Collision envelope: single vertical cylinder, radius=0.260 m (robot 0.260 + margin 0.000), z=[-0.125, +0.125] around the query point; orientation independent.
+[INFO] [1790868432.693184173] [sentry_sim.pcl_render_node]: Lidar extrinsic in body frame: xyz=(-0.0300, 0.0770, 0.0601) rpy=(0.00, 0.00, 0.00) deg
+[WARN] [1790868432.644888124] [sentry_sim.map_pub]: DEMO MAP: cut points outside z=[0.000, 1.500] m (after map_offset_z=-0.300) -> removed 453746 of 631508 points (71.9%). This is an absolute-height cut, NOT ground segmentation: everything below 0.300 m in the ORIGINAL PCD is gone, including real low structures. Not for real-robot use.
+
+## FSM 状态转换（去重保序）
+[FSM]: from INIT to WAIT_TARGET
+[FSM]: from WAIT_TARGET to GEN_NEW_TRAJ
+[FSM]: from GEN_NEW_TRAJ to EXEC_TRAJ
+[FSM]: from EXEC_TRAJ to REPLAN_TRAJ
+[FSM]: from REPLAN_TRAJ to EXEC_TRAJ
+[FSM]: from REPLAN_TRAJ to REPLAN_TRAJ
+[EMERGENCY_EXIT]: from EMERGENCY_STOP to WAIT_TARGET
+
+## 告警/错误类型计数（数字已归一化）
+      7 [ERROR] [N] [sentry_sim.pcl_render_node.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:N, at ./src/rcl/publisher.c:N
+      3 [ERROR] [N] [sentry_sim.pcl_render_node.rclcpp]: Error in destruction of rcl subscription handle: Failed to delete datareader, at ./src/subscription.cpp:N, at ./src/rcl/subscription.c:N
+      1 [WARN] [N] [sentry_sim.scan_planner_node]: Replan failed N times; emergency stop and wait for a new target
+      1 [WARN] [N] [sentry_sim.scan_planner_node]: [GridMap] no sensor_pose received for lidar cloud update
+      1 [WARN] [N] [sentry_sim.map_pub]: DEMO MAP: cut points outside z=[N, N] m (after map_offset_z=-N) -> removed N of N points (N%). This is an absolute-height cut, NOT ground segmentation: everything below N m in the ORIGINAL PCD is gone, including real low structures. Not for real-robot use.
+      1 [ERROR] [reference_path_publisher.py-N]: process has died [pid N, exit code N, cmd '/home/hzq/nav/adapt_VI_N_Sentry/install/scan_planner/lib/scan_planner/reference_path_publisher.py --ros-args -r __node:=reference_path_publisher -r __ns:=/sentry_sim --params-file /home/hzq/nav/adapt_VI_N_Sentry/install/scan_planner/share/scan_planner/config/sentry_reference_path.yaml --params-file /tmp/launch_params__wehmdnN'].
+      1 [ERROR] [pcl_render_node-N]: process has died [pid N, exit code -N, cmd '/home/hzq/nav/adapt_VI_N_Sentry/install/local_sensing_node/lib/local_sensing_node/pcl_render_node --ros-args -r __node:=pcl_render_node -r __ns:=/sentry_sim --params-file /home/hzq/nav/adapt_VI_N_Sentry/install/scan_planner/share/scan_planner/config/sentry_simulator.yaml --params-file /tmp/launch_params_NylcrNnN -r global_map:=/sentry_sim/global_cloud'].
+
+## 关键事件
+收到轨迹条数: 7
+A-star 失败: 0
+动力学可行性失败: 0
+重规划连续失败告警: 1
+任务取消: 0
+取消闩锁: 0
+拒绝轨迹: 0
+到达航点规划: 0

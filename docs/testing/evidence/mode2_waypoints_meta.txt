@@ -1,0 +1,2 @@
+scenario=mode2_waypoints
+t0_epoch=1790868371.961735

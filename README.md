@@ -12,12 +12,16 @@ ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 迁移的调研、实施与
 | S0 | 记录基线、PCD、外形、外参、限速 | 完成，见 [S0 基线](docs/migration/s0_baseline.md) |
 | S1 | 全向适配：odom 朝向、取消强制对齐、全向碰撞包络 | 完成，见 [实施报告](docs/migration/implementation_report.md) |
 | S2 | PCD + RViz 闭环仿真（速度积分反馈 odom） | 完成 |
-| S3 | 三模式与失效场景验证 | 完成，见 [测试结果](docs/testing/s3_results.md) |
-| — | Codex 审查 | **待进行** |
+| S3 | 三模式与失效场景验证 | 完成（第二轮修正后），见 [测试结果](docs/testing/s3_results.md) |
+| — | Codex 第一轮审查 | 已完成，发现 4 项缺陷，已修正 |
+| — | Codex 复审 | **待进行** |
 | I1–I4 | 接入 VI_26_Sentry 实车 | 未开始，另获授权后进行 |
 
-**尚未接实车。** 本仓库所有输出都在 `/sentry_sim` 命名空间内，不存在通往 UART / 底盘
+**尚未接实车，也尚未通过复审。** 本仓库所有输出都在 `/sentry_sim` 命名空间内，不存在通往 UART / 底盘
 的路径；仿真中的加速度、地面过滤阈值等参数是仿真取值，不是实车标定结果。
+
+RViz 图形交互在本环境**无法验证**（创建不了 OpenGL 上下文），当前状态是
+**"无界面闭环已有运行记录；RViz 交互待验收"**。
 
 ## 快速开始
 
@@ -45,9 +49,12 @@ scripts/run_sentry_sim.sh start_rviz:=false               # 无界面
 无界面环境下跑场景验证与证据收集：
 
 ```bash
+scripts/make_test_maps.py --out-dir docs/testing/maps  # 生成受控合成地图
 scripts/smoke_test.sh 1              # 节点/话题/频率冒烟
-scripts/scenario.sh mode1_lateral    # 场景记录，输出到 log/scenarios/
+scripts/scenario.sh mode1_lateral    # 场景记录 + 判据，失败返回非零
+scripts/scenario.sh gap_edge         # 受控碰撞：0.44 m 缺口，中心线不碰但车体边缘会碰
 scripts/check_clearance.py --csv log/scenarios/mode1_lateral.csv   # 独立净空检查
+scripts/summarize_launch_log.sh      # 生成可审查的日志摘要
 ```
 
 ## 目录
@@ -68,8 +75,11 @@ src/simulator/         地图发布、局部雷达渲染、合成地图
 
 - **三维导航的含义**：沿用 SCAN 的三维占据/空间避障与参考高度实现，不做自由 z 优化、
   跨层全局搜索或轮地接触规划。
-- **地面过滤**：`rmuc2026_field.pcd` 的地面高度散布约 -0.06..0.22 m，必须过滤地面点，
-  否则地板本身会被判为障碍；代价是矮于约 0.30 m 的原始障碍也会被剔除。
+- **地面处理是演示方案，不是正式方案**：`rmuc2026_field.pcd` 的地面高度散布约
+  -0.06..0.22 m，当前做法是把地图整体下移并按**绝对高度删点**（实测删掉 71.9% 的点）。
+  这会连带删除矮于约 0.30 m 的**真实**结构——`low_obstacle_cut` 场景已复现该后果。
+  原始地图通过 `/sentry_sim/global_cloud_raw` 保留对照显示。
+  正式的局部地面高度/地面分割**尚未实现**，该阈值不得带到实车。
 - **加速度上限**：RM 的 MPPI 加速度上限为 UNKNOWN，仿真用的是示例值。
 - **安全余量**：用户未给出，当前 `safety_margin = 0`。
 - 详细限制与未测项见 [测试结果](docs/testing/s3_results.md)。

@@ -4,7 +4,35 @@
 PCD/RViz 闭环仿真。**未接实车、未修改 RM 的 LIO/配准/TF/Nav2 参数/串口/固件。**
 基线输入见 [S0 基线](s0_baseline.md)，测试结果见 [S3 结果](../testing/s3_results.md)。
 
+## 第二轮：Codex 审查后的修正
+
+Codex 审查认为方向正确但**不能认定 S0–S3 已验收**，并提出 4 项缺陷 + 3 项判断。
+本轮的修正如下（详细证据见 [S3 结果](../testing/s3_results.md) 第四节）：
+
+| 缺陷 | 修正 |
+|---|---|
+| **取消后机器人重新运动**（已用日志反证） | FSM 也订阅 `planning/reset`：取消时清 `have_target_`/`trigger_`、清 `local_data_.start_time_`、回 `WAIT_TARGET`，此后不再发布轨迹。跟踪器加**取消闩锁**：记录取消时刻，拒绝 `start_time` 早于该时刻的在途轨迹。验证：取消后 6 s 内 605 个命令样本全为 0 |
+| **过期轨迹被当成新轨迹从头执行** | `closed_loop_controller` 改为**拒绝**而非重置：过期（`elapsed > start_time_align_limit`）拒绝、`start_time` 在未来（`> future_time_tolerance`）拒绝；未提供 `start_time` 时接受但告警说明无法判陈旧 |
+| **测试脚本可能误杀其它进程** | `scenario.sh` 用 `setsid` 把仿真放进独立进程组，清理只 `kill -- -PGID`；断流测试用 `pkill -g PGID`，不再用宽泛的 `pkill -f 进程名` |
+| **测试误判通过** | 判据移到 `scripts/check_stop.py`：从**实际事件时刻**计时，要求时限内归零**且**观察窗内持续为零，事件前必须有非零命令，失败返回非零。记录器不再按场景名分流（改为 `--send-goal`/`--cancel-after` 显式驱动），并真正等待观察窗 |
+
+对 Codex 三项判断的处理：
+
+- **地面处理**：按意见**降级为演示方案**——参数、日志、文档统一标注"绝对高度切图，
+  非地面识别，会删除矮结构，不得用于实车"；`map_pub` 额外发布未过滤对照云
+  `/sentry_sim/global_cloud_raw`，RViz 新增对照显示；并用受控场景量化了代价。
+  正式的局部地面高度/地面分割本轮**未实现**。
+- **碰撞验收**：新增 4 张几何明确的合成地图（封闭房间 + 带缺口隔墙），覆盖
+  "宽于车体通过 / 窄于车体拒绝 / 中心线不碰但车体边缘会碰时拒绝 / 矮障碍必须仍然拦停"。
+  这三类拒绝均由 `A-star failed`（膨胀占据图无通路）驱动，可行性失败为 0，
+  因此可以主张碰撞逻辑本身有效。
+- **RViz**：仍标为**未验证**，措辞改为"无界面闭环已有运行记录；RViz 交互待验收"。
+
+新增脚本：`scripts/check_stop.py`（停车判据）、`scripts/check_passage.py`（通过/拒绝判据）、
+`scripts/make_test_maps.py`（合成地图）、`scripts/summarize_launch_log.sh`（日志摘要）。
+
 ## 改动清单（相对上游 `103bce4`）
+
 
 ### 修改的文件
 
@@ -12,12 +40,12 @@ PCD/RViz 闭环仿真。**未接实车、未修改 RM 的 LIO/配准/TF/Nav2 参
 |---|---|---|
 | `plan_env/include/plan_env/grid_map.h` | `getInflateOccupancy(pos,yaw)` 在 `offset≈0` 时只查询单个竖直圆柱；新增 `safety_margin_` | 全向底盘的运动方向不等于机头朝向，原来的双圆柱近似依赖轨迹切线 yaw |
 | `plan_env/src/grid_map.cpp` | 新增 `grid_map.safety_margin` 参数；膨胀半径 = 半径 + 余量；打印生效包络 | 余量参数化；把生效包络写进日志便于核对 |
-| `plan_manage/src/closed_loop_controller.cpp` | 取消「先对齐 yaw 才平移」的门槛；新增 `yaw_mode`(hold/align/spin)、`spin_rate`、`odom_timeout`、`start_time_align_limit`；新增 `planning/reset`；轨迹合法性/odom 有效性校验 | 全向适配的核心；上游在 `|yaw_error|>0.8` 时冻结轨迹并只转向，RM 的 UART 又不转发 `angular.z`，会导致永久冻结 |
+| `plan_manage/src/closed_loop_controller.cpp` | 取消「先对齐 yaw 才平移」的门槛；新增 `yaw_mode`(hold/align/spin)、`spin_rate`、`odom_timeout`、`start_time_align_limit`、`future_time_tolerance`；新增 `planning/reset` **取消闩锁**；**过期/未来时间的轨迹明确拒绝**；轨迹合法性与 odom 有效性校验 | 全向适配的核心；上游在 `|yaw_error|>0.8` 时冻结轨迹并只转向，RM 的 UART 又不转发 `angular.z`，会导致永久冻结。取消闩锁与陈旧拒绝见第二轮修正 |
 | `plan_manage/src/go2_kinematic_sim.cpp` | `kMaxVYawLimit` 1.0→1.5；新增可选一阶加速度限制 `max_acc_xy`/`max_acc_yaw`；发布实际角速度 | 允许 MPPI 的 `wz_max=1.5`；让速度不能瞬间跳变，闭环跟踪误差才有意义 |
-| `plan_manage/src/scan_replan_fsm.cpp` | 包络 marker 带上 `safety_margin`；`offset≈0` 时不重复发布重合圆柱，改为补一个机头朝向箭头 | RViz 显示与碰撞检查使用一致语义，并显示实际车身朝向 |
-| `plan_manage/include/plan_manage/scan_replan_fsm.h` | 新增 `self_safety_margin_` | 同上 |
+| `plan_manage/src/scan_replan_fsm.cpp` | 订阅 `planning/reset`，新增 `resetTask()`（取消目标、清轨迹时间基准、回 `WAIT_TARGET`）；包络 marker 带上 `safety_margin`；`offset≈0` 时不重复发布重合圆柱，改为补机头朝向箭头 | 只清跟踪器无法停止任务——规划器会继续发轨迹，机器人会重新运动；RViz 显示与碰撞检查同一语义 |
+| `plan_manage/include/plan_manage/scan_replan_fsm.h` | 新增 `self_safety_margin_`、`reset_requested_`、`reset_sub_`、`resetCallback`/`resetTask` | 同上 |
 | `simulator/local_sensing/src/pointcloud_render_node.cpp` | 新增 `sensor_offset_x/y/z`、`sensor_roll/pitch/yaw`；射线起点与方向改由 `sensor2world = body2world × sensor2body` 给出；`world→sensor` TF 与 `sensor_pose` 改用同一外参 | 上游只有硬编码 `lidar_pitch` 且忽略安装平移，射线原点被当作机体原点 |
-| `simulator/map_generator/src/map_publisher.cpp` | 新增高度带过滤 `keep_z_min`/`keep_z_max`，过滤后为空则报错 | 剔除地面点，否则地板会被判为障碍（见 S0 的 PCD 分析） |
+| `simulator/map_generator/src/map_publisher.cpp` | 高度带过滤 `keep_z_min`/`keep_z_max`（**显式标注为演示地图的绝对高度切图**，日志打出删除点数与原始等效高度）；新增 `publish_raw_cloud` 发布未过滤对照云；过滤后为空则报错 | 剔除地面点，否则地板会被判为障碍。按 Codex 意见降级为演示方案并提供对照（见 S3 结果第五节） |
 | `plan_manage/CMakeLists.txt`、`package.xml` | 安装新的 RViz 配置；删除本仓库不存在的 `go2_description`/`odom_visualization`（及未用的 `robot_state_publisher`/`xacro`）依赖声明 | 保持 manifest 与实际内容一致 |
 
 ### 新增的文件
@@ -26,7 +54,7 @@ PCD/RViz 闭环仿真。**未接实车、未修改 RM 的 LIO/配准/TF/Nav2 参
 |---|---|
 | `config/sentry_planner.yaml` | SCAN 规划参数：包络 0.26/offset 0、高度带 ±0.125、`body_height` 0.125、`max_vel` 1.0 |
 | `config/sentry_controllers.yaml` | 跟踪器与运动模拟器参数：MPPI 限速、`yaw_mode`、odom 超时、仿真加速度 |
-| `config/sentry_simulator.yaml` | 地图发布（地面过滤、z 归零）与雷达渲染（真实外参、FOV、量程） |
+| `config/sentry_simulator.yaml` | 地图发布（演示用高度过滤、z 归零）与雷达渲染（真实外参、FOV、量程） |
 | `config/sentry_waypoints.yaml` | Mode 2 航点示例 |
 | `config/sentry_reference_path.yaml` | Mode 3 参考路线示例 |
 | `launch/sentry_sim.launch.py` | 统一入口：`/sentry_sim` 命名空间、三模式、参数校验 |

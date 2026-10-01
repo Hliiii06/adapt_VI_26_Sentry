@@ -10,7 +10,7 @@
 - 本目录自 2026-10-01 起是**私有 Git 仓库**：`git@github.com:Hliiii06/adapt_VI_26_Sentry.git`，主分支 `main`。入库内容是文档、`scripts/`、`AGENTS.md`、`README.md`、`build.md` 与 `src/`（纳入本仓库的 SCAN 源码）；`artifacts/`、`log/`、`build/`、`install/` 由 `.gitignore` 排除，编译产物不入库，也不要用 `git add -f` 绕过。
 - 参考仓库（`../VI_26_Sentry`、`../../SCAN-Planner-Ros2`、`../../SCAN-Planner`）各有自己的远端，不要在本仓库提交或推送它们的源码与改动；本仓库正常提交/推送无需再逐次征求许可，但**推送前**确认没有密钥、串口配置等敏感文件被新增进跟踪范围。
 - **`src/` 是实施副本，不是参考仓库**：来源为 SCAN-Planner-Ros2 main `103bce4`，改动边界见 [实施报告](docs/migration/implementation_report.md)。不要再把 `../../SCAN-Planner-Ros2` 当作待改代码；它保持只读。RM 的 `../VI_26_Sentry` 始终只读。
-- 当前阶段：**S0–S3 已实施完成（SCAN 全向适配 + PCD/RViz 闭环仿真已跑通），等待 Codex 审查**，尚未接入 VI_26_Sentry 实车。历史文档轮的限制（只改文档、不构建运行）已被用户后续的实施指示取代。实施入口见 [实施报告](docs/migration/implementation_report.md)。
+- 当前阶段：**S0–S3 已实施，Codex 第一轮审查发现的 4 项缺陷已修正（取消后复活、过期轨迹、测试误杀进程、测试误判通过），并补了受控碰撞场景；等待 Codex 复审**，尚未接入 VI_26_Sentry 实车。RViz 图形交互在本环境无法验证。实施入口见 [实施报告](docs/migration/implementation_report.md)，测试证据见 [S3 结果](docs/testing/s3_results.md)。
 
 用户最新确认：三维导航指 SCAN 当前的三维占据/空间避障与参考高度实现，不要求自由三维或完整地形通行规划；现有 RM 配置已由用户验证 RViz 2D goal 规划并驱动实车；小陀螺部分由电控负责，仓库相关源码不代表实际执行路径。C 方向已认可，实施结果见 [实施报告](docs/migration/implementation_report.md)。
 
@@ -37,6 +37,7 @@
 - 保留用户未提交文件，不使用 `reset --hard`、`clean -fd`。不要自动恢复不是自己产生的修改。
 - 改接口需记录：topic、type、publisher、subscriber、QoS、frame、时间戳来源及频率。
 - 改 TF 需记录：parent、child、publisher、pose source、频率和原因；禁止 silent TF change。
+- 测试脚本必须只终止**本次启动**的进程：仿真用 `setsid` 放进独立进程组，清理只 `kill -- -PGID`；不要用 `pkill -f scan_planner_node` 这类宽泛匹配，它会误杀同一用户的其它实验。判据脚本失败必须返回非零，不要用"第一次速度到零"这类近乎恒真的条件。
 - 新依赖先记录名称、用途、代码位置、当前可用性，再决定安装；不要随意 `apt install`、`pip install`、`git clone`。
 
 ## 验证与安全

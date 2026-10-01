@@ -1,0 +1,2 @@
+scenario=low_obstacle_cut
+t0_epoch=1790868153.465749

@@ -16,12 +16,16 @@ RM 保留未跟踪的 `src/Sophus/`、`src/hnurm_navigation/BRINGUP_LAUNCH_EXPLA
 
 ## 最新实施入口
 
-S0–S3 已在 `src/` 内实施完成并通过仿真验证，等待 Codex 审查，尚未接 VI_26_Sentry 实车。
+S0–S3 已在 `src/` 内实施，Codex 第一轮审查发现的 4 项缺陷已修正并补充受控碰撞场景，
+等待 **Codex 复审**；尚未接 VI_26_Sentry 实车，RViz 图形交互未验证。
 
 - [S0 基线](migration/s0_baseline.md)：PCD 分析、机器人/外参/限速输入、坐标系与高度约定。
-- [实施报告](migration/implementation_report.md)：相对上游 `103bce4` 的改动清单与理由。
-- [S3 结果](testing/s3_results.md)：9 个场景的实测数据、独立净空检查、未验证项。
-- [原始证据](testing/evidence/)：场景报告与 `cmd_vel` 记录。
+- [实施报告](migration/implementation_report.md)：相对上游 `103bce4` 的改动清单、理由，
+  以及第二轮对 Codex 审查意见的处理。
+- [S3 结果](testing/s3_results.md)：受控碰撞场景矩阵、三模式与失效停止实测数据、
+  独立净空检查、上一轮缺陷与修正、未验证项。
+- [原始证据](testing/evidence/)：场景报告、`cmd_vel` 记录、日志摘要。
+- [合成测试地图](testing/maps/)：几何尺寸明确的受控地图与 `INDEX.txt`。
 - [实施计划](migration/plan.md)、[harness 交接说明](migration/implementation_handoff.md)：阶段划分与交付边界。
 
 仓库入口与构建/启动命令见根 [README.md](../../README.md)。

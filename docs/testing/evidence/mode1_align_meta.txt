@@ -1,0 +1,2 @@
+scenario=mode1_align
+t0_epoch=1790868262.786731

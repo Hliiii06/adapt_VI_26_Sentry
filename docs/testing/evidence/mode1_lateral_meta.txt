@@ -1,0 +1,2 @@
+scenario=mode1_lateral
+t0_epoch=1790868222.793041

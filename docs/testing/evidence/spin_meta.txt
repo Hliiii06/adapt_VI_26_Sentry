@@ -1,0 +1,2 @@
+scenario=spin
+t0_epoch=1790868493.469341

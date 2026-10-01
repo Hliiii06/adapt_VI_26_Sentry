@@ -50,11 +50,14 @@ public:
     spin_rate_ = declare_parameter<double>("spin_rate", 0.0);
     odom_timeout_ = declare_parameter<double>("odom_timeout", 0.5);
     start_time_align_limit_ = declare_parameter<double>("start_time_align_limit", 0.5);
+    future_time_tolerance_ = declare_parameter<double>("future_time_tolerance", 0.05);
 
     if (yaw_mode_ != "hold" && yaw_mode_ != "align" && yaw_mode_ != "spin")
       throw std::runtime_error("yaw_mode must be 'hold', 'align' or 'spin'");
     if (odom_timeout_ <= 0.0)
       throw std::runtime_error("odom_timeout must be positive");
+    if (start_time_align_limit_ <= 0.0)
+      throw std::runtime_error("start_time_align_limit must be positive");
 
     bspline_sub_ = create_subscription<scan_planner_msgs::msg::Bspline>(
         "planning/bspline", 10,
@@ -72,8 +75,10 @@ public:
     last_update_time_ = now();
     RCLCPP_INFO(get_logger(),
                 "Omnidirectional closed-loop tracker ready: yaw_mode=%s, "
-                "vx=%.2f, vy=%.2f, wz=%.2f, odom_timeout=%.2fs",
-                yaw_mode_.c_str(), max_vx_, max_vy_, max_vyaw_, odom_timeout_);
+                "vx=%.2f, vy=%.2f, wz=%.2f, odom_timeout=%.2fs, "
+                "trajectory age limit=%.2fs (older/future trajectories are rejected)",
+                yaw_mode_.c_str(), max_vx_, max_vy_, max_vyaw_, odom_timeout_,
+                start_time_align_limit_);
   }
 
 private:
@@ -128,9 +133,15 @@ private:
   {
     if (!msg->data)
       return;
+    // 记录取消时刻：此后到达的、start_time 早于该时刻的轨迹一律拒绝，
+    // 防止取消前发出、取消后才送达的在途轨迹重新驱动机器人。
+    cancel_time_ = now();
     clearTrajectory("reset requested; stopping and forgetting the active trajectory");
     publishExecutionFrozen(false);
     publishStop();
+    RCLCPP_WARN(get_logger(),
+                "Cancel latched at %.3f; trajectories older than this will be rejected",
+                cancel_time_.seconds());
   }
 
   void bsplineCallback(const scan_planner_msgs::msg::Bspline::ConstSharedPtr msg)
@@ -185,22 +196,48 @@ private:
     traj_id_ = msg->traj_id;
     last_update_time_ = now();
 
-    // 与 FSM 的 local_data_.start_time_ 对齐：轨迹从 start_time 开始执行，而不是
-    // 从本回调被调用的时刻开始。超出合理范围（时钟异常、重放）时退回 t=0。
-    double elapsed = 0.0;
+    // ---- 轨迹时间契约 ----
+    // 与 FSM 的 local_data_.start_time_ 对齐：轨迹从 start_time 开始执行。三条规则：
+    //   1) start_time 早于最近一次取消 -> 拒绝（取消前发出、取消后才到的在途轨迹）。
+    //   2) 已经过期（elapsed 超过容忍上限）-> 拒绝，不再从头执行，避免旧轨迹重新驱动底盘。
+    //   3) start_time 明显在未来（时钟异常）-> 拒绝。
+    // 只有落在容忍窗口内的轨迹才被接受，并按 elapsed 起算。
     const rclcpp::Time start_time(msg->start_time);
-    if (start_time.seconds() > 1e-5)
+    if (start_time.seconds() <= 1e-5)
     {
-      elapsed = (now() - start_time).seconds();
-      if (!std::isfinite(elapsed) || elapsed < 0.0 ||
-          elapsed > std::min(start_time_align_limit_, traj_duration_))
-      {
-        RCLCPP_WARN(get_logger(), "Trajectory %ld start_time offset %.3fs unusable; starting at t=0",
-                    static_cast<long long>(traj_id_), elapsed);
-        elapsed = 0.0;
-      }
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                           "Trajectory has no start_time; staleness cannot be checked, starting at t=0");
+      exec_time_ = 0.0;
     }
-    exec_time_ = std::min(elapsed, traj_duration_);
+    else
+    {
+      if (cancel_time_.seconds() > 1e-5 && start_time <= cancel_time_)
+      {
+        RCLCPP_WARN(get_logger(),
+                    "Rejecting trajectory %ld published before the last cancel (start_time %.3f <= cancel %.3f)",
+                    static_cast<long long>(traj_id_), start_time.seconds(), cancel_time_.seconds());
+        clearTrajectory("stale trajectory from before the last cancel");
+        return;
+      }
+      const double elapsed = (now() - start_time).seconds();
+      if (elapsed > start_time_align_limit_)
+      {
+        RCLCPP_WARN(get_logger(),
+                    "Rejecting expired trajectory %ld: start_time is %.3fs old (limit %.3fs)",
+                    static_cast<long long>(traj_id_), elapsed, start_time_align_limit_);
+        clearTrajectory("expired trajectory");
+        return;
+      }
+      if (elapsed < -future_time_tolerance_)
+      {
+        RCLCPP_WARN(get_logger(),
+                    "Rejecting trajectory %ld with start_time %.3fs in the future (tolerance %.3fs)",
+                    static_cast<long long>(traj_id_), -elapsed, future_time_tolerance_);
+        clearTrajectory("trajectory start_time is in the future");
+        return;
+      }
+      exec_time_ = std::clamp(elapsed, 0.0, traj_duration_);
+    }
 
     // hold 模式锁定接收轨迹瞬间的机身朝向。
     hold_yaw_ = odom_yaw_;
@@ -318,9 +355,11 @@ private:
   double exec_time_{0.0};
   rclcpp::Time last_update_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time cancel_time_{0, 0, RCL_ROS_TIME};
   double time_forward_, kp_pos_, kp_yaw_;
   double max_vx_, max_vy_, max_vyaw_, finish_dist_;
   double spin_rate_{0.0}, odom_timeout_{0.5}, start_time_align_limit_{0.5};
+  double future_time_tolerance_{0.05};
   std::string yaw_mode_;
 };
 }  // namespace scan_planner
