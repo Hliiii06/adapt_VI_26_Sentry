@@ -1,0 +1,334 @@
+// 全向哨兵闭环跟踪器。
+//
+// 与上游 SCAN-Planner ROS 2（main 103bce4）的差异：
+//   1. 取消“先对齐轨迹切线朝向才允许平移”的门槛。上游在 |yaw_error| >
+//      heading_error_threshold 时只发原地转向并冻结轨迹时间；RM 侧的 UART 不
+//      转发 angular.z，全向底盘会永远停在冻结态。这里改为始终按实际 odom 姿态
+//      把世界系速度旋转到机体系，朝向与平移互不阻塞。
+//   2. 新增 yaw_mode，把“机身朝向”与“运动方向”解耦：
+//        hold  —— 保持接收轨迹时的机身朝向，横移时车头不变（哨兵默认）；
+//        align —— 跟踪轨迹切线朝向，但不再阻塞平移；
+//        spin  —— 叠加恒定自转速率 spin_rate，用于“边转边走”包络测试。
+//   3. 收到新轨迹时用消息自带的 start_time 对齐执行时间，而不是无条件把
+//      exec_time 清零，使其与 FSM 的 local_data_.start_time_ 时序一致。
+//   4. 增加 odom 有效性/新鲜度检查、显式 reset（取消）输入与轨迹合法性校验。
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include <Eigen/Eigen>
+#include <geometry_msgs/msg/twist.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <scan_planner_msgs/msg/bspline.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/utils.h>
+
+#include "bspline_opt/uniform_bspline.h"
+
+namespace scan_planner
+{
+class ClosedLoopController : public rclcpp::Node
+{
+public:
+  ClosedLoopController() : Node("closed_loop_controller")
+  {
+    time_forward_ = declare_parameter<double>("time_forward", 0.8);
+    kp_pos_ = declare_parameter<double>("kp_pos", 0.8);
+    kp_yaw_ = declare_parameter<double>("kp_yaw", 1.5);
+    max_vx_ = declare_parameter<double>("max_vx", 1.0);
+    max_vy_ = declare_parameter<double>("max_vy", 1.0);
+    max_vyaw_ = declare_parameter<double>("max_vyaw", 1.5);
+    finish_dist_ = declare_parameter<double>("finish_dist", 0.15);
+    yaw_mode_ = declare_parameter<std::string>("yaw_mode", "hold");
+    spin_rate_ = declare_parameter<double>("spin_rate", 0.0);
+    odom_timeout_ = declare_parameter<double>("odom_timeout", 0.5);
+    start_time_align_limit_ = declare_parameter<double>("start_time_align_limit", 0.5);
+
+    if (yaw_mode_ != "hold" && yaw_mode_ != "align" && yaw_mode_ != "spin")
+      throw std::runtime_error("yaw_mode must be 'hold', 'align' or 'spin'");
+    if (odom_timeout_ <= 0.0)
+      throw std::runtime_error("odom_timeout must be positive");
+
+    bspline_sub_ = create_subscription<scan_planner_msgs::msg::Bspline>(
+        "planning/bspline", 10,
+        std::bind(&ClosedLoopController::bsplineCallback, this, std::placeholders::_1));
+    odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+        "body_pose", rclcpp::SensorDataQoS(),
+        std::bind(&ClosedLoopController::odomCallback, this, std::placeholders::_1));
+    reset_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "planning/reset", 10,
+        std::bind(&ClosedLoopController::resetCallback, this, std::placeholders::_1));
+    cmd_vel_pub_ = create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 20);
+    execution_frozen_pub_ = create_publisher<std_msgs::msg::Bool>("planning/go2_execution_frozen", 10);
+    cmd_timer_ = create_wall_timer(std::chrono::milliseconds(10),
+                                   std::bind(&ClosedLoopController::cmdCallback, this));
+    last_update_time_ = now();
+    RCLCPP_INFO(get_logger(),
+                "Omnidirectional closed-loop tracker ready: yaw_mode=%s, "
+                "vx=%.2f, vy=%.2f, wz=%.2f, odom_timeout=%.2fs",
+                yaw_mode_.c_str(), max_vx_, max_vy_, max_vyaw_, odom_timeout_);
+  }
+
+private:
+  static double normalizeAngle(double angle)
+  {
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+  }
+
+  static Eigen::Vector2d clampNorm(const Eigen::Vector2d &value, double max_norm)
+  {
+    const double norm = value.norm();
+    return (norm <= max_norm || norm < 1e-6) ? value : value / norm * max_norm;
+  }
+
+  double estimateDesiredYaw(double t_cur, const Eigen::Vector3d &pos_des) const
+  {
+    const double t_look = std::min(traj_duration_, t_cur + time_forward_);
+    Eigen::Vector3d direction = traj_[0].evaluateDeBoorT(t_look) - pos_des;
+    if (direction.head<2>().squaredNorm() < 1e-4)
+      direction = traj_[1].evaluateDeBoorT(t_cur);
+    return direction.head<2>().squaredNorm() < 1e-4
+        ? odom_yaw_ : std::atan2(direction.y(), direction.x());
+  }
+
+  void publishStop(double yaw_rate = 0.0)
+  {
+    geometry_msgs::msg::Twist cmd;
+    cmd.angular.z = std::clamp(yaw_rate, -max_vyaw_, max_vyaw_);
+    cmd_vel_pub_->publish(cmd);
+  }
+
+  void publishExecutionFrozen(bool frozen)
+  {
+    std_msgs::msg::Bool msg;
+    msg.data = frozen;
+    execution_frozen_pub_->publish(msg);
+  }
+
+  void clearTrajectory(const std::string &reason)
+  {
+    if (receive_traj_)
+      RCLCPP_WARN(get_logger(), "Trajectory cleared: %s", reason.c_str());
+    receive_traj_ = false;
+    traj_.clear();
+    traj_duration_ = 0.0;
+    exec_time_ = 0.0;
+  }
+
+  void resetCallback(const std_msgs::msg::Bool::ConstSharedPtr msg)
+  {
+    if (!msg->data)
+      return;
+    clearTrajectory("reset requested; stopping and forgetting the active trajectory");
+    publishExecutionFrozen(false);
+    publishStop();
+  }
+
+  void bsplineCallback(const scan_planner_msgs::msg::Bspline::ConstSharedPtr msg)
+  {
+    if (msg->pos_pts.empty() || msg->knots.empty() || msg->order <= 0)
+    {
+      RCLCPP_WARN(get_logger(), "Ignoring invalid B-spline (order/pts/knots)");
+      return;
+    }
+    if (msg->pos_pts.size() < static_cast<size_t>(msg->order) + 1 ||
+        msg->knots.size() != msg->pos_pts.size() + msg->order + 1)
+    {
+      RCLCPP_WARN(get_logger(), "Ignoring malformed B-spline: %zu points, %zu knots, order %d",
+                  msg->pos_pts.size(), msg->knots.size(), msg->order);
+      return;
+    }
+
+    Eigen::MatrixXd points(3, msg->pos_pts.size());
+    for (size_t i = 0; i < msg->pos_pts.size(); ++i)
+    {
+      const auto &pt = msg->pos_pts[i];
+      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z))
+      {
+        RCLCPP_WARN(get_logger(), "Ignoring B-spline with non-finite control point");
+        return;
+      }
+      points.col(i) << pt.x, pt.y, pt.z;
+    }
+    Eigen::VectorXd knots(msg->knots.size());
+    for (size_t i = 0; i < msg->knots.size(); ++i)
+    {
+      if (!std::isfinite(msg->knots[i]))
+      {
+        RCLCPP_WARN(get_logger(), "Ignoring B-spline with non-finite knot");
+        return;
+      }
+      knots(i) = msg->knots[i];
+    }
+
+    UniformBspline position(points, msg->order, 0.1);
+    position.setKnot(knots);
+    const double duration = position.getTimeSum();
+    if (!std::isfinite(duration) || duration <= 1e-3)
+    {
+      RCLCPP_WARN(get_logger(), "Ignoring B-spline with invalid duration %.4f", duration);
+      return;
+    }
+
+    traj_ = {position, position.getDerivative()};
+    traj_.push_back(traj_[1].getDerivative());
+    traj_duration_ = duration;
+    traj_id_ = msg->traj_id;
+    last_update_time_ = now();
+
+    // 与 FSM 的 local_data_.start_time_ 对齐：轨迹从 start_time 开始执行，而不是
+    // 从本回调被调用的时刻开始。超出合理范围（时钟异常、重放）时退回 t=0。
+    double elapsed = 0.0;
+    const rclcpp::Time start_time(msg->start_time);
+    if (start_time.seconds() > 1e-5)
+    {
+      elapsed = (now() - start_time).seconds();
+      if (!std::isfinite(elapsed) || elapsed < 0.0 ||
+          elapsed > std::min(start_time_align_limit_, traj_duration_))
+      {
+        RCLCPP_WARN(get_logger(), "Trajectory %ld start_time offset %.3fs unusable; starting at t=0",
+                    static_cast<long long>(traj_id_), elapsed);
+        elapsed = 0.0;
+      }
+    }
+    exec_time_ = std::min(elapsed, traj_duration_);
+
+    // hold 模式锁定接收轨迹瞬间的机身朝向。
+    hold_yaw_ = odom_yaw_;
+    have_hold_yaw_ = true;
+    receive_traj_ = true;
+    RCLCPP_INFO(get_logger(), "Received trajectory %ld, duration %.3fs, start at t=%.3fs",
+                static_cast<long long>(traj_id_), traj_duration_, exec_time_);
+  }
+
+  void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
+  {
+    const auto &pose = msg->pose.pose;
+    if (!std::isfinite(pose.position.x) || !std::isfinite(pose.position.y) ||
+        !std::isfinite(pose.position.z))
+    {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Rejecting odometry with non-finite position");
+      return;
+    }
+    const auto &q = pose.orientation;
+    const double norm = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    if (!std::isfinite(norm) || norm < 1e-6)
+    {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Rejecting odometry with invalid orientation quaternion");
+      return;
+    }
+    tf2::Quaternion quaternion(q.x / norm, q.y / norm, q.z / norm, q.w / norm);
+    odom_pos_ << pose.position.x, pose.position.y, pose.position.z;
+    odom_yaw_ = tf2::getYaw(quaternion);
+    last_odom_time_ = now();
+    have_odom_ = true;
+  }
+
+  void cmdCallback()
+  {
+    const auto current_time = now();
+
+    if (!receive_traj_ || !have_odom_)
+    {
+      publishExecutionFrozen(false);
+      publishStop();
+      return;
+    }
+
+    const double odom_age = (current_time - last_odom_time_).seconds();
+    if (odom_age < 0.0 || odom_age > odom_timeout_)
+    {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Odometry stale (%.3fs > %.3fs); stopping", odom_age, odom_timeout_);
+      // 输入失效时立即停止并遗忘轨迹，恢复后不会重新激活旧命令。
+      clearTrajectory("odometry input stale");
+      publishExecutionFrozen(false);
+      publishStop();
+      return;
+    }
+
+    double dt = (current_time - last_update_time_).seconds();
+    if (dt < 0.0 || dt > 0.2) dt = 0.0;
+    last_update_time_ = current_time;
+
+    const double t_eval = std::min(exec_time_, traj_duration_);
+    Eigen::Vector3d pos_des = traj_[0].evaluateDeBoorT(t_eval);
+
+    // ---- 朝向：与平移解耦，任何 yaw 误差都不阻塞 XY 运动 ----
+    double desired_yaw = odom_yaw_;
+    if (yaw_mode_ == "align")
+      desired_yaw = estimateDesiredYaw(t_eval, pos_des);
+    else if (yaw_mode_ == "hold" && have_hold_yaw_)
+      desired_yaw = hold_yaw_;
+
+    double yaw_command = 0.0;
+    if (yaw_mode_ == "spin")
+      yaw_command = std::clamp(spin_rate_, -max_vyaw_, max_vyaw_);
+    else
+      yaw_command = std::clamp(kp_yaw_ * normalizeAngle(desired_yaw - odom_yaw_), -max_vyaw_, max_vyaw_);
+
+    // ---- 平移：世界系前馈 + 比例反馈，再按实际机身 yaw 旋转到机体系 ----
+    exec_time_ = std::min(traj_duration_, exec_time_ + dt);
+    pos_des = traj_[0].evaluateDeBoorT(exec_time_);
+    const Eigen::Vector3d vel_des = traj_[1].evaluateDeBoorT(exec_time_);
+    const Eigen::Vector2d pos_error(pos_des.x() - odom_pos_.x(), pos_des.y() - odom_pos_.y());
+    const Eigen::Vector2d vel_world = clampNorm(
+        Eigen::Vector2d(vel_des.x(), vel_des.y()) + kp_pos_ * pos_error,
+        std::max(max_vx_, max_vy_));
+    const double c = std::cos(odom_yaw_);
+    const double s = std::sin(odom_yaw_);
+    geometry_msgs::msg::Twist command;
+    command.linear.x = std::clamp(c * vel_world.x() + s * vel_world.y(), -max_vx_, max_vx_);
+    command.linear.y = std::clamp(-s * vel_world.x() + c * vel_world.y(), -max_vy_, max_vy_);
+    command.angular.z = yaw_command;
+
+    if (exec_time_ >= traj_duration_ && pos_error.norm() < finish_dist_)
+      command = geometry_msgs::msg::Twist();
+
+    publishExecutionFrozen(false);
+    cmd_vel_pub_->publish(command);
+  }
+
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr execution_frozen_pub_;
+  rclcpp::Subscription<scan_planner_msgs::msg::Bspline>::SharedPtr bspline_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;
+  rclcpp::TimerBase::SharedPtr cmd_timer_;
+  bool receive_traj_{false};
+  bool have_odom_{false};
+  bool have_hold_yaw_{false};
+  std::vector<UniformBspline> traj_;
+  double traj_duration_{0.0};
+  std::int64_t traj_id_{0};
+  Eigen::Vector3d odom_pos_{Eigen::Vector3d::Zero()};
+  double odom_yaw_{0.0};
+  double hold_yaw_{0.0};
+  double exec_time_{0.0};
+  rclcpp::Time last_update_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
+  double time_forward_, kp_pos_, kp_yaw_;
+  double max_vx_, max_vy_, max_vyaw_, finish_dist_;
+  double spin_rate_{0.0}, odom_timeout_{0.5}, start_time_align_limit_{0.5};
+  std::string yaw_mode_;
+};
+}  // namespace scan_planner
+
+int main(int argc, char **argv)
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<scan_planner::ClosedLoopController>());
+  rclcpp::shutdown();
+  return 0;
+}

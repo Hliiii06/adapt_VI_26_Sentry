@@ -16,7 +16,15 @@ RM 保留未跟踪的 `src/Sophus/`、`src/hnurm_navigation/BRINGUP_LAUNCH_EXPLA
 
 ## 最新实施入口
 
-先独立改 SCAN 全向模型并用用户 PCD 完成 RViz 闭环仿真，保留三种模式；DeepSeek harness 实现，Codex 后续审查，再接 RM。见 [实施交接说明](migration/implementation_handoff.md)与 [更新后的阶段计划](migration/plan.md)。实车接口文档仍保留作第二阶段参考，不是独立仿真开发的先决条件。
+S0–S3 已在 `src/` 内实施完成并通过仿真验证，等待 Codex 审查，尚未接 VI_26_Sentry 实车。
+
+- [S0 基线](migration/s0_baseline.md)：PCD 分析、机器人/外参/限速输入、坐标系与高度约定。
+- [实施报告](migration/implementation_report.md)：相对上游 `103bce4` 的改动清单与理由。
+- [S3 结果](testing/s3_results.md)：9 个场景的实测数据、独立净空检查、未验证项。
+- [原始证据](testing/evidence/)：场景报告与 `cmd_vel` 记录。
+- [实施计划](migration/plan.md)、[harness 交接说明](migration/implementation_handoff.md)：阶段划分与交付边界。
+
+仓库入口与构建/启动命令见根 [README.md](../../README.md)。
 
 ## 15 分钟阅读顺序
 

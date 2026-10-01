@@ -7,11 +7,12 @@
 - 用户已指定：文档维护在本目录；RM 参考 `../VI_26_Sentry` 的 **main**。
 - ROS 2 SCAN：`../../SCAN-Planner-Ros2`；ROS 1 注释参考：`../../SCAN-Planner`。
 - 精确提交、脏文件及证据入口见 [docs/README.md](docs/README.md)。不要把 `feature/odin` 或已有 `install/` 的行为当成 main 源码事实。
-- 本目录自 2026-10-01 起是**私有 Git 仓库**：`git@github.com:Hliiii06/adapt_VI_26_Sentry.git`，主分支 `main`。入库内容是文档与 `AGENTS.md`；`artifacts/`、`log/`、`build/`、`install/` 由 `.gitignore` 排除，编译产物不入库，也不要用 `git add -f` 绕过。切换参考版本后必须重新核对文档。
+- 本目录自 2026-10-01 起是**私有 Git 仓库**：`git@github.com:Hliiii06/adapt_VI_26_Sentry.git`，主分支 `main`。入库内容是文档、`scripts/`、`AGENTS.md`、`README.md`、`build.md` 与 `src/`（纳入本仓库的 SCAN 源码）；`artifacts/`、`log/`、`build/`、`install/` 由 `.gitignore` 排除，编译产物不入库，也不要用 `git add -f` 绕过。
 - 参考仓库（`../VI_26_Sentry`、`../../SCAN-Planner-Ros2`、`../../SCAN-Planner`）各有自己的远端，不要在本仓库提交或推送它们的源码与改动；本仓库正常提交/推送无需再逐次征求许可，但**推送前**确认没有密钥、串口配置等敏感文件被新增进跟踪范围。
-- 当前 Codex 文档轮只改文档、不构建运行。用户将另行交由 DeepSeek harness 实现独立 SCAN 全向适配和仿真，之后由 Codex 审查；未来获实施任务时按下述范围执行，不将本轮文档限制误当永久禁令。
+- **`src/` 是实施副本，不是参考仓库**：来源为 SCAN-Planner-Ros2 main `103bce4`，改动边界见 [实施报告](docs/migration/implementation_report.md)。不要再把 `../../SCAN-Planner-Ros2` 当作待改代码；它保持只读。RM 的 `../VI_26_Sentry` 始终只读。
+- 当前阶段：**S0–S3 已实施完成（SCAN 全向适配 + PCD/RViz 闭环仿真已跑通），等待 Codex 审查**，尚未接入 VI_26_Sentry 实车。历史文档轮的限制（只改文档、不构建运行）已被用户后续的实施指示取代。实施入口见 [实施报告](docs/migration/implementation_report.md)。
 
-用户最新确认：三维导航指 SCAN 当前的三维占据/空间避障与参考高度实现，不要求自由三维或完整地形通行规划；现有 RM 配置已由用户验证 RViz 2D goal 规划并驱动实车；小陀螺部分由电控负责，仓库相关源码不代表实际执行路径。C 方向已认可，具体实施计划见 docs/migration/plan.md，本轮仍只修改文档。
+用户最新确认：三维导航指 SCAN 当前的三维占据/空间避障与参考高度实现，不要求自由三维或完整地形通行规划；现有 RM 配置已由用户验证 RViz 2D goal 规划并驱动实车；小陀螺部分由电控负责，仓库相关源码不代表实际执行路径。C 方向已认可，实施结果见 [实施报告](docs/migration/implementation_report.md)。
 
 最新实施顺序与交付边界以 [实施计划](docs/migration/plan.md)和 [harness 交接说明](docs/migration/implementation_handoff.md)为准：保留三种模式，适配 odom 朝向、全向跟踪和碰撞检查；用用户 PCD 完成 RViz 闭环运动仿真，再审查、再接入 VI_26_Sentry。
 
@@ -31,7 +32,7 @@
 - Prefer minimal changes. Do not perform broad refactoring unless explicitly required.
 - 接口连接 prefer adapters；全向适配允许必要的局部 SCAN 碰撞、odom 姿态、跟踪、FSM 时序及仿真代码修改。不要以“保留核心”为由遗漏碰撞代价/安全检查，也不做无关重构。
 - 默认保留 topic 名称、message 类型、TF 含义、frame 名和底盘协议。架构调整先形成可评审建议，经用户同意再实施。
-- 当前 Codex 文档轮不改代码。后续独立仿真实施范围是 SCAN 相关改动与仿真/测试；不得顺带修改 RM 的 LIO、配准、TF、Nav2 配置、串口或固件。代码实施目录、分支及已有修改先记录，禁止覆盖用户工作。
+- 实施范围已限定为 SCAN 相关改动与仿真/测试（在 `src/` 内）；不得顺带修改 RM 的 LIO、配准、TF、Nav2 配置、串口或固件。改动前后都保留用户已有修改，禁止覆盖用户工作。
 - 结论区分 `CONFIRMED`、`INFERRED`、`UNKNOWN`；候选设计标 `PROPOSED`。每个关键结论给出文件及函数/参数。未由本轮运行验证的内容不能声称本轮实测；用户已验证的 RM 导航须明确标注证据来自用户，不推广为 SCAN 适配已验证。
 - 保留用户未提交文件，不使用 `reset --hard`、`clean -fd`。不要自动恢复不是自己产生的修改。
 - 改接口需记录：topic、type、publisher、subscriber、QoS、frame、时间戳来源及频率。
@@ -40,16 +41,19 @@
 
 ## 验证与安全
 
-涉及 cmd_vel、轨迹、TF、定位、里程计、碰撞、速度/加速度或底盘控制时，`colcon build` 成功不等于完成。按静态验证 → 构建 → 仿真/rosbag → 可视化 → 受控实车测试推进，见 [验证计划](docs/testing/validation_plan.md)。本阶段不执行这些运行步骤。
+涉及 cmd_vel、轨迹、TF、定位、里程计、碰撞、速度/加速度或底盘控制时，`colcon build` 成功不等于完成。按静态验证 → 构建 → 仿真/rosbag → 可视化 → 受控实车测试推进，见 [验证计划](docs/testing/validation_plan.md)。仿真阶段已执行（结果见 [S3 结果](docs/testing/s3_results.md)）；**RViz 图形交互在本环境无法验证**（无法创建 OpenGL 上下文），实车测试未开始。
 
 SCAN 的 `open_loop_controller` 会直接发布模拟里程计，不是实车速度接口。不能因名字有 controller 就接入定位话题。两个规划器并存时，最终速度输出必须有单一授权来源。
 
 ## 常用只读命令
 
 ```bash
-# 本仓库（文档工作区）
+# 本仓库（文档 + 实施）
 git status --short --branch
 git log --oneline -5
+scripts/build.sh                       # 隔离构建（产物在 build/install，日志在 log/ros）
+scripts/run_sentry_sim.sh navi_mode:=1 # 启动闭环仿真
+scripts/scenario.sh mode1_lateral      # 场景验证，结果在 log/scenarios/
 
 # 参考仓库（只读）
 git -C ../VI_26_Sentry status --short --branch
