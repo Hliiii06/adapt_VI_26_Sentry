@@ -67,10 +67,30 @@ def make_scenario(angle_deg, y_base=0.0, y_top=3.0, length=4.0):
     return terrain, top_z
 
 
+def make_hill(angle_deg, y_up_start=0.0, y_up_end=2.0, y_down_start=3.0, y_down_end=5.0):
+    """上坡 -> 平台 -> 下坡，用于"跨越坡顶"判据。"""
+    slope = math.tan(math.radians(angle_deg))
+    top_z = slope * (y_up_end - y_up_start)
+
+    def terrain(x, y):
+        if y <= y_up_start:
+            return 0.0
+        if y <= y_up_end:
+            return slope * (y - y_up_start)
+        if y <= y_down_start:
+            return top_z
+        if y <= y_down_end:
+            return max(0.0, top_z - slope * (y - y_down_start))
+        return 0.0
+
+    return terrain, top_z
+
+
 SCENARIOS = [
     ("ramp_10deg", 10.0, "10° 上坡，应被跟随"),
     ("ramp_20deg", 20.0, "20° 上坡，应被跟随"),
     ("ramp_30deg", 30.0, "30° 上坡；最陡，用于观察跟随极限与声明局限"),
+    ("hill_20deg", 20.0, "20° 上坡->平台->20° 下坡，用于跨越坡顶"),
 ]
 
 
@@ -90,7 +110,10 @@ def main():
              "# 地面网格 cell=%.2f x0=%.2f y0=%.2f nx=%d ny=%d" % (CELL, x0, y0, nx, ny),
              "name\tangle_deg\ttop_z\tfile"]
     for name, angle, desc in SCENARIOS:
-        terrain, top_z = make_scenario(angle)
+        if name.startswith("hill"):
+            terrain, top_z = make_hill(angle)
+        else:
+            terrain, top_z = make_scenario(angle)
         # 障碍：只有两侧的墙
         obstacles = wall_z(-ROOM_X, Y_MIN, Y_MAX) + wall_z(+ROOM_X, Y_MIN, Y_MAX)
         write_pcd(os.path.join(args.out_dir, name + ".pcd"), obstacles)

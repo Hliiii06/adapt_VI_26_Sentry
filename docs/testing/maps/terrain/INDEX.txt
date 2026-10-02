@@ -5,3 +5,4 @@ name	angle_deg	top_z	file
 ramp_10deg	10	0.529	ramp_10deg.pcd
 ramp_20deg	20	1.092	ramp_20deg.pcd
 ramp_30deg	30	1.732	ramp_30deg.pcd
+hill_20deg	20	0.728	hill_20deg.pcd

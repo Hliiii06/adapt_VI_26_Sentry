@@ -6,6 +6,7 @@
 #include <bspline_opt/bspline_optimizer.h>
 #include <bspline_opt/uniform_bspline.h>
 #include <plan_env/grid_map.h>
+#include <plan_manage/ground_height_map.h>
 #include <plan_manage/plan_container.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <traj_utils/planning_visualization.h>
@@ -49,6 +50,16 @@ namespace scan_planner
     BsplineOptimizer::Ptr bspline_optimizer_rebound_;
 
     int continuous_failures_count_{0};
+
+    // 地形跟随的 z 参考：让局部轨迹每个点的 z 由同一张地面网格决定，
+    // 与运动模拟器的 z 语义一致（不再是起终点之间的线性插值）。
+    // 网格未覆盖的点回退到线性参考，并统计数量供告警。
+    void applyTerrainZReference(std::vector<Eigen::Vector3d> &points, double start_z,
+                                double target_z, int &out_of_grid_count);
+
+    GroundHeightMap ground_map_;
+    bool terrain_following_{false};
+    double body_height_{0.125};
 
     void updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now);
     bool checkDynamicFeasibility(UniformBspline position_traj);

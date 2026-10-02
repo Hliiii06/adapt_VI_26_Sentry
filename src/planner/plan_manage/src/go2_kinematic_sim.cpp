@@ -169,7 +169,22 @@ private:
     x_ += vx_world_ * dt;
     y_ += vy_world_ * dt;
     if (terrain_following_)
-      z_ = ground_map_.heightAt(x_, y_) + body_height_;
+    {
+      // 越界时保持上一次有效高度并告警：**不能把网格外的未知区域当成延伸出去的地面**。
+      if (ground_map_.contains(x_, y_))
+      {
+        z_ = ground_map_.heightAt(x_, y_) + body_height_;
+      }
+      else
+      {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                             "Robot at (%.2f, %.2f) is outside the ground grid "
+                             "(x[%.2f,%.2f] y[%.2f,%.2f]); holding last valid z=%.3f instead of "
+                             "extrapolating unknown terrain",
+                             x_, y_, ground_map_.minX(), ground_map_.maxX(),
+                             ground_map_.minY(), ground_map_.maxY(), z_);
+      }
+    }
     yaw_ = normalizeAngle(yaw_ + wz_applied_ * dt);
     publishOdom(current_time);
   }

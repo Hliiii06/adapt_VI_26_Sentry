@@ -19,7 +19,9 @@
 #   gap_edge          合成地图 0.44 m 通道：中心线不碰、车体边缘会碰（预期拒绝）
 #   low_obstacle      合成地图 0.15 m 矮障碍，不删点（预期拦停）
 #   low_obstacle_cut  同一地图套用演示删点（预期被穿过 = 复现已知缺陷）
-#   terrain_ramp10/20/30  合成 10/20/30° 坡，验证 z 跟随地形
+#   terrain_ramp10/20/30  合成 10/20/30° 上坡
+#   terrain_down     同一 20° 坡反向（下坡）
+#   terrain_crest    上坡->平台->下坡（跨越坡顶）
 #   terrain_field    真实场地 + 地形分离，Mode 3，z 跟随真实地面（起伏约 0.14 m）
 #   terrain_field_mode1  同上但走 Mode 1（RViz 2D Goal Pose 链路）
 #   terrain_tunnel   穿中央洞口的 Mode 3 路线（当前失败，原因见 docs/testing/tunnel_diagnosis.md）
@@ -72,6 +74,8 @@ case "${SCENARIO}" in
   # 真实场地 + 地形分离：障碍云喂 SCAN，地形表面仅供 RViz 显示，z 跟随真实地面
   terrain_field)   MODE=3; EXTRA=(reference_path_file:=${MAPS}/field/field_slope_mode3.yaml)
                    DUR=45; CHECK=terrain; SEND_GOAL=false
+                   TERRAIN_EXPECT=uphill; GOAL_X=-11.00; GOAL_Y=-1.75; TOL=0.60
+                   MIN_RISE=0.10
                    INIT_X=-11.75; INIT_Y=-7.50; GROUND_GRID="${MAPS}/field/rmuc2026_ground.txt"
                    SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/field/rmuc2026_obstacles.pcd map_offset_z:=0.0
                                  keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
@@ -94,11 +98,37 @@ case "${SCENARIO}" in
                                  keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
                                  ground_file:=${MAPS}/field/rmuc2026_surface.pcd
                                  ground_grid_file:=${MAPS}/field/rmuc2026_ground.txt) ;;
+  # 下坡：同一条 20° 坡，路线反向
+  terrain_down)    TMAP=ramp_20deg
+                   MODE=3; EXTRA=(reference_path_file:=${MAPS}/terrain/${TMAP}_down_mode3.yaml)
+                   DUR=45; CHECK=terrain; SEND_GOAL=false
+                   TERRAIN_EXPECT=downhill; GOAL_X=0.0; GOAL_Y=-2.0; TOL=0.60; MIN_DROP=0.80
+                   GROUND_GRID="${MAPS}/terrain/${TMAP}_ground.txt"
+                   INIT_X=0.0; INIT_Y=5.0
+                   SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/terrain/${TMAP}.pcd map_offset_z:=0.0
+                                 keep_z_min:=-1.0 keep_z_max:=2.5 publish_raw_cloud:=false
+                                 ground_file:=${MAPS}/terrain/${TMAP}_ground.pcd
+                                 ground_grid_file:=${MAPS}/terrain/${TMAP}_ground.txt) ;;
+  # 跨越坡顶：上坡 -> 平台 -> 下坡
+  terrain_crest)   TMAP=hill_20deg
+                   MODE=3; EXTRA=(reference_path_file:=${MAPS}/terrain/${TMAP}_mode3.yaml)
+                   DUR=55; CHECK=terrain; SEND_GOAL=false
+                   TERRAIN_EXPECT=crest; GOAL_X=0.0; GOAL_Y=6.5; TOL=0.60
+                   MIN_RISE=0.55; MIN_DROP=0.55
+                   GROUND_GRID="${MAPS}/terrain/${TMAP}_ground.txt"
+                   INIT_X=0.0; INIT_Y=-2.0
+                   SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/terrain/${TMAP}.pcd map_offset_z:=0.0
+                                 keep_z_min:=-1.0 keep_z_max:=2.5 publish_raw_cloud:=false
+                                 ground_file:=${MAPS}/terrain/${TMAP}_ground.pcd
+                                 ground_grid_file:=${MAPS}/terrain/${TMAP}_ground.txt) ;;
   # 合成坡度地形：验证高度跟随。Mode 3 路线由地形网格生成（z = 地面，SCAN 再加 body_height）
   terrain_ramp10|terrain_ramp20|terrain_ramp30)
                    ANGLE="${SCENARIO#terrain_ramp}"; TMAP="ramp_${ANGLE}deg"
                    MODE=3; EXTRA=(reference_path_file:=${MAPS}/terrain/${TMAP}_mode3.yaml)
                    DUR=45; CHECK=terrain; SEND_GOAL=false
+                   TERRAIN_EXPECT=uphill; GOAL_X=0.0; GOAL_Y=5.0; TOL=0.60
+                   MIN_RISE="$(python3 -c "import math;print('%.3f'%(math.tan(math.radians(${ANGLE}))*3.0*0.8))")"
+                   GROUND_GRID="${MAPS}/terrain/${TMAP}_ground.txt"
                    INIT_X=0.0; INIT_Y=-2.0
                    SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/terrain/${TMAP}.pcd map_offset_z:=0.0
                                  keep_z_min:=-1.0 keep_z_max:=2.5 publish_raw_cloud:=false
@@ -190,14 +220,10 @@ else
   fi
 
   if [[ "${CHECK}" == "terrain" ]]; then
-    GRID="${GROUND_GRID:-${MAPS}/terrain/ramp_${SCENARIO#terrain_ramp}deg_ground.txt}"
-    RISECAP=""
-    if [[ "${SCENARIO}" == "terrain_field" ]]; then
-      # 真实场地缓坡只有 0.14 m，默认 0.05 m 的最小上升量仍然适用
-      RISECAP="--min-rise 0.05"
-    fi
-    if ! python3 scripts/check_terrain.py --csv "${OUT}.csv" --ground-grid "${GRID}" \
-         --body-height 0.125 ${RISECAP}; then
+    if ! python3 scripts/check_terrain.py --csv "${OUT}.csv" --ground-grid "${GROUND_GRID}" \
+         --body-height 0.125 --expect "${TERRAIN_EXPECT}" \
+         --min-rise "${MIN_RISE:-0.10}" --min-drop "${MIN_DROP:-0.10}" \
+         --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" --goal-tolerance "${TOL:-0.60}"; then
       FAILURES=$((FAILURES+1))
     fi
   fi

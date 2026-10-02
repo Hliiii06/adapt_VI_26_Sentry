@@ -39,6 +39,48 @@ namespace scan_planner
     }
   } // namespace
 
+  void SCANPlannerManager::applyTerrainZReference(std::vector<Eigen::Vector3d> &points,
+                                                  const double start_z, const double target_z,
+                                                  int &out_of_grid_count)
+  {
+    out_of_grid_count = 0;
+    if (points.empty())
+      return;
+    if (points.size() == 1)
+    {
+      points.front()(2) = start_z;
+      return;
+    }
+
+    // 线性参考：仅用于网格未覆盖的点（**不把未知区域当成延伸出去的可行驶地面**）
+    std::vector<double> linear(points.size(), start_z);
+    std::vector<double> accumulated(points.size(), 0.0);
+    for (size_t i = 1; i < points.size(); ++i)
+      accumulated[i] = accumulated[i - 1] + (points[i].head<2>() - points[i - 1].head<2>()).norm();
+    const double total = accumulated.back();
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+      const double ratio = total > 1e-6 ? accumulated[i] / total
+                                        : static_cast<double>(i) / static_cast<double>(points.size() - 1);
+      linear[i] = start_z + ratio * (target_z - start_z);
+    }
+
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+      const double x = points[i](0);
+      const double y = points[i](1);
+      if (ground_map_.contains(x, y))
+        points[i](2) = ground_map_.heightAt(x, y) + body_height_;
+      else
+      {
+        points[i](2) = linear[i];
+        ++out_of_grid_count;
+      }
+    }
+    // 起点必须与当前状态连续，避免轨迹一开始就跳。
+    points.front()(2) = start_z;
+  }
+
   // SECTION interfaces for setup and query
 
   SCANPlannerManager::SCANPlannerManager() {}
@@ -53,6 +95,27 @@ namespace scan_planner
       if (!node->has_parameter(name)) node->declare_parameter<double>(name, default_value);
       return node->get_parameter(name).as_double();
     };
+    // 地形跟随：与运动模拟器读同一个网格文件，保证两侧 z 语义一致。
+    const auto get_string = [node](const std::string &name, const std::string &default_value) {
+      if (!node->has_parameter(name)) node->declare_parameter<std::string>(name, default_value);
+      return node->get_parameter(name).as_string();
+    };
+    const std::string ground_file = get_string("grid_map.ground_grid_file", "");
+    body_height_ = get_double("grid_map.body_height", 0.125);
+    if (!ground_file.empty())
+    {
+      if (!ground_map_.load(ground_file))
+        throw std::runtime_error("grid_map.ground_grid_file could not be loaded: " + ground_file);
+      terrain_following_ = true;
+      RCLCPP_INFO(node->get_logger(),
+                  "Planner terrain following ENABLED from %s: ground z in [%.3f, %.3f] m, "
+                  "grid x[%.2f, %.2f] y[%.2f, %.2f], body height %.3f m; local trajectory z "
+                  "will follow the same grid as the simulator",
+                  ground_file.c_str(), ground_map_.minHeight(), ground_map_.maxHeight(),
+                  ground_map_.minX(), ground_map_.maxX(), ground_map_.minY(), ground_map_.maxY(),
+                  body_height_);
+    }
+
     pp_.max_vel_ = get_double("manager.max_vel", -1.0);
     pp_.max_acc_ = get_double("manager.max_acc", -1.0);
     pp_.max_jerk_ = get_double("manager.max_jerk", -1.0);
@@ -248,7 +311,20 @@ namespace scan_planner
       }
     } while (flag_regenerate);
 
-    applyLinearZReference(point_set, start_pt(2), local_target_pt(2));
+    if (terrain_following_)
+    {
+      int out_of_grid = 0;
+      applyTerrainZReference(point_set, start_pt(2), local_target_pt(2), out_of_grid);
+      if (out_of_grid > 0)
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+                             "Terrain z reference: %d of %zu initial points fall outside the ground "
+                             "grid; those use the linear reference instead of unknown terrain",
+                             out_of_grid, point_set.size());
+    }
+    else
+    {
+      applyLinearZReference(point_set, start_pt(2), local_target_pt(2));
+    }
 
     Eigen::MatrixXd ctrl_pts;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);

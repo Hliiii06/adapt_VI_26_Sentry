@@ -141,6 +141,79 @@ def robust_fit(rows, iterations=6, huber=0.10, verbose=True):
     return coef
 
 
+# ---------------------------------------------------------------- 本地地面估计
+
+def percentile(values, q):
+    s = sorted(values)
+    return s[min(len(s) - 1, int(q * len(s)))]
+
+
+def compute_local_ground(cells, cell, min_points, ground_pct, smooth_iters, verbose=True):
+    """按网格取低分位数作为局部地面，并做补洞 + 中值平滑。
+
+    与全局二次曲面的区别：**局部地面可以跟随坡道**。全局曲面只能表达缓慢起伏，
+    坡道面比它高出阈值就会被误判成障碍（这正是洞口/斜坡场景卡住的原因之一）。
+
+    结构物顶部可能被当成局部地面，但结构边缘那一圈格子里同时有地面与顶部，
+    低分位数取到的是地面，因此顶部点在那里仍是障碍，结构依然不可驶入。
+    """
+    ground = {k: percentile(v, ground_pct) for k, v in cells.items() if len(v) >= min_points}
+
+    # 补洞：反复用已知邻居的均值填充，直到没有可填的
+    for _ in range(50):
+        filled = 0
+        for k in cells:
+            if k in ground:
+                continue
+            nb = [ground[(k[0] + dx, k[1] + dy)]
+                  for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                  if (k[0] + dx, k[1] + dy) in ground]
+            if nb:
+                ground[k] = sum(nb) / len(nb)
+                filled += 1
+        if filled == 0:
+            break
+    if verbose:
+        missing = len(cells) - len(ground)
+        print("  局部地面格: %d，补洞后仍缺 %d" % (len(ground), max(0, missing)))
+
+    # 中值平滑：去孤立尖峰，同时保留坡道的连续升降
+    for _ in range(smooth_iters):
+        new = {}
+        for k, v in ground.items():
+            nb = [ground[(k[0] + dx, k[1] + dy)]
+                  for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                  if (k[0] + dx, k[1] + dy) in ground]
+            nb.append(v)
+            new[k] = sorted(nb)[len(nb) // 2]
+        ground = new
+    return ground
+
+
+def make_local_lookup(ground, cell):
+    """把格地面变成连续查询函数（最近格 + 双线性）。"""
+    def at(x, y):
+        i = int(math.floor(x / cell))
+        j = int(math.floor(y / cell))
+        g = []
+        for dx in (0, 1):
+            for dy in (0, 1):
+                g.append(ground.get((i + dx, j + dy)))
+        if g[0] is None and g[1] is None and g[2] is None and g[3] is None:
+            # 回退：找最近的已知格
+            for r in range(1, 20):
+                for ddx in range(-r, r + 1):
+                    for ddy in range(-r, r + 1):
+                        v = ground.get((i + ddx, j + ddy))
+                        if v is not None:
+                            return v
+            return 0.0
+        vals = [v for v in g if v is not None]
+        return sum(vals) / len(vals)
+
+    return at
+
+
 # ---------------------------------------------------------------- 主流程
 
 def main():
@@ -154,7 +227,11 @@ def main():
     parser.add_argument("--min-points", type=int, default=8,
                         help="格内点数少于此值不参与地面拟合")
     parser.add_argument("--obstacle-height", type=float, default=0.08,
-                        help="高于拟合地面该值算障碍（米）")
+                        help="高于地面该值算障碍（米）")
+    parser.add_argument("--ground-mode", choices=["local", "global"], default="local",
+                        help="local=局部低分位数地面（能跟随坡道，默认）；"
+                             "global=全局二次曲面（旧做法，会把坡道误判成障碍）")
+    parser.add_argument("--smooth-iters", type=int, default=2)
     args = parser.parse_args()
 
     print("读取 %s ..." % args.input)
@@ -176,18 +253,28 @@ def main():
         candidates.append(((key[0] + 0.5) * cell, (key[1] + 0.5) * cell, zs[idx]))
     print("参与地面拟合的格: %d / %d" % (len(candidates), len(cells)))
 
-    print("稳健拟合二次地面曲面 ...")
-    coef = robust_fit(candidates, verbose=True)
-    print("地面曲面: z = %.4f + %.5f x + %.5f y + %.6f x^2 + %.6f y^2 + %.6f xy"
-          % tuple(coef))
+    if args.ground_mode == "global":
+        print("稳健拟合二次地面曲面（旧做法：无法跟随局部坡道）...")
+        coef = robust_fit(candidates, verbose=True)
+        print("地面曲面: z = %.4f + %.5f x + %.5f y + %.6f x^2 + %.6f y^2 + %.6f xy"
+              % tuple(coef))
+        ground_at = lambda x, y: eval_surface(coef, x, y)
+        coef_report = ", ".join("%.6f" % c for c in coef)
+    else:
+        print("计算局部地面（每格 %.2f m，%.0f 分位，中值平滑 %d 次）..."
+              % (cell, args.ground_percentile * 100, args.smooth_iters))
+        local = compute_local_ground(cells, cell, args.min_points,
+                                     args.ground_percentile, args.smooth_iters)
+        ground_at = make_local_lookup(local, cell)
+        coef_report = "local percentile grid (cell %.2f, pct %.2f)" % (cell, args.ground_percentile)
 
-    ground_vals = [eval_surface(coef, x, y) for (x, y, _) in candidates]
-    print("拟合地面高度范围: [%.3f, %.3f] m" % (min(ground_vals), max(ground_vals)))
+    ground_vals = [ground_at(x, y) for (x, y, _) in candidates]
+    print("地面高度范围: [%.3f, %.3f] m" % (min(ground_vals), max(ground_vals)))
 
     obstacles, ground_pts = [], []
     heights = []
     for x, y, z in points:
-        g = eval_surface(coef, x, y)
+        g = ground_at(x, y)
         h = z - g
         heights.append(h)
         if h >= args.obstacle_height:
@@ -210,8 +297,8 @@ def main():
         for j in range(ny):
             row = []
             for i in range(nx):
-                row.append("%.5f" % eval_surface(coef, (x0 + i + 0.5) * cell,
-                                                 (y0 + j + 0.5) * cell))
+                row.append("%.5f" % ground_at((x0 + i + 0.5) * cell,
+                                              (y0 + j + 0.5) * cell))
             handle.write(" ".join(row) + "\n")
 
     # 地形表面点云：每个地面网格一个点，仅用于 RViz 显示地形起伏。
@@ -221,15 +308,15 @@ def main():
         for i in range(x0, x1 + 1):
             cx = (i + 0.5) * cell
             cy = (j + 0.5) * cell
-            surface.append((round(cx, 3), round(cy, 3), round(eval_surface(coef, cx, cy), 4)))
+            surface.append((round(cx, 3), round(cy, 3), round(ground_at(cx, cy), 4)))
     write_pcd_xyz(args.out_prefix + "_surface.pcd", surface)
 
     heights.sort()
     report = [
         "输入: %s" % args.input,
         "总点数: %d" % len(points),
-        "地面曲面系数 (1,x,y,x^2,y^2,xy): %s" % ", ".join("%.6f" % c for c in coef),
-        "拟合地面高度范围: [%.3f, %.3f] m" % (min(ground_vals), max(ground_vals)),
+        "地面模型: %s" % coef_report,
+        "地面高度范围: [%.3f, %.3f] m" % (min(ground_vals), max(ground_vals)),
         "高于地面的高度分布: p05=%.3f p50=%.3f p95=%.3f max=%.3f m" % (
             heights[len(heights) // 20], heights[len(heights) // 2],
             heights[len(heights) * 19 // 20], heights[-1]),
