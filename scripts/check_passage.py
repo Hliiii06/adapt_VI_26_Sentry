@@ -20,9 +20,23 @@ def load(path):
     rows = []
     with open(path) as handle:
         for r in csv.DictReader(handle):
-            rows.append((float(r["t"]), float(r["x"]), float(r["y"])))
+            rows.append((float(r["t"]), float(r["x"]), float(r["y"]),
+                         float(r.get("yaw", 0.0))))
     rows.sort()
     return rows
+
+
+def yaw_travel(rows):
+    """累计转角：把相邻帧的 yaw 差取绝对值累加，避免只看首末（可能绕圈回到同角）。"""
+    total = 0.0
+    for i in range(1, len(rows)):
+        d = rows[i][3] - rows[i - 1][3]
+        while d > math.pi:
+            d -= 2.0 * math.pi
+        while d < -math.pi:
+            d += 2.0 * math.pi
+        total += abs(d)
+    return total
 
 
 def main():
@@ -34,6 +48,8 @@ def main():
     parser.add_argument("--goal-x", type=float, default=0.0)
     parser.add_argument("--goal-y", type=float, default=0.0)
     parser.add_argument("--tolerance", type=float, default=0.20)
+    parser.add_argument("--min-yaw-travel", type=float, default=None,
+                        help="要求全程累计转过的角度（弧度）不小于该值（spin 场景）")
     args = parser.parse_args()
 
     rows = load(args.csv)
@@ -43,6 +59,13 @@ def main():
     x0, y0 = rows[0][1], rows[0][2]
     x1, y1 = rows[-1][1], rows[-1][2]
     print("起点 (%.3f, %.3f) -> 终点 (%.3f, %.3f)" % (x0, y0, x1, y1))
+
+    if args.min_yaw_travel is not None:
+        travel = yaw_travel(rows)
+        print("累计转角 %.3f rad（要求 >= %.3f）" % (travel, args.min_yaw_travel))
+        if travel < args.min_yaw_travel:
+            print("失败：转向不足，未能验证旋转中平移")
+            return 1
 
     if args.expect == "none":
         return 0

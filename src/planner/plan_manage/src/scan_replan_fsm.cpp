@@ -98,6 +98,9 @@ namespace scan_planner
     reset_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
         "planning/reset", 10,
         std::bind(&SCANReplanFSM::resetCallback, this, std::placeholders::_1));
+    task_active_pub_ = node_->create_publisher<std_msgs::msg::Bool>(
+        "planning/task_active", rclcpp::QoS(1).reliable().transient_local());
+    publishTaskActive(false);
 
     bspline_pub_ = node_->create_publisher<scan_planner_msgs::msg::Bspline>("planning/bspline", 10);
     data_disp_pub_ = node_->create_publisher<scan_planner_msgs::msg::DataDisp>("planning/data_display", 100);
@@ -133,6 +136,7 @@ namespace scan_planner
 
     if (planNextWaypoint())
     {
+      publishTaskActive(true);
       changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
     }
     else
@@ -208,6 +212,7 @@ namespace scan_planner
       end_vel_.setZero();
       have_target_ = true;
       have_new_target_ = true;
+      publishTaskActive(true);
 
       /*** FSM ***/
       if (exec_state_ == WAIT_TARGET)
@@ -408,6 +413,7 @@ namespace scan_planner
         changeFSMExecState(REPLAN_TRAJ, "TRIG");
       }
 
+      publishTaskActive(true);
       RCLCPP_INFO(node_->get_logger(), "Reference path accepted");
     }
     else
@@ -454,6 +460,17 @@ namespace scan_planner
     go2_execution_frozen_ = msg->data;
   }
 
+  void SCANReplanFSM::publishTaskActive(bool active)
+  {
+    if (task_active_ == active && !active)
+      return;  // 已处于未授权状态时不必重复发布
+    task_active_ = active;
+    std_msgs::msg::Bool msg;
+    msg.data = active;
+    task_active_pub_->publish(msg);
+    RCLCPP_INFO(node_->get_logger(), "Task authorization: %s", active ? "GRANTED" : "REVOKED");
+  }
+
   void SCANReplanFSM::resetCallback(const std_msgs::msg::Bool::ConstSharedPtr &msg)
   {
     // 只置标志，实际取消在 execFSMCallback 里做，保证与状态机在同一线程、同一时刻生效。
@@ -484,6 +501,7 @@ namespace scan_planner
     info->traj_id_ = 0;
     planner_manager_->global_data_.global_duration_ = 0.0;
 
+    publishTaskActive(false);
     changeFSMExecState(WAIT_TARGET, "RESET");
     RCLCPP_WARN(node_->get_logger(),
                 "Task cancelled: target and planned trajectory cleared; "

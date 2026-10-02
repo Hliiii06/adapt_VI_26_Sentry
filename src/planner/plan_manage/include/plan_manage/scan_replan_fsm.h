@@ -103,6 +103,10 @@ namespace scan_planner
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr go2_execution_frozen_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;
+    // 任务授权：取消后必须重新授权才允许执行。仅靠时间戳推断新旧任务不完整，
+    // 因此增加显式信号；transient_local 保证后启动的执行端也能收到当前状态。
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr task_active_pub_;
+    bool task_active_{false};
     rclcpp::Publisher<scan_planner_msgs::msg::Bspline>::SharedPtr bspline_pub_;
     rclcpp::Publisher<scan_planner_msgs::msg::DataDisp>::SharedPtr data_disp_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr self_inflation_pub_;
@@ -140,6 +144,7 @@ namespace scan_planner
     void go2ExecutionFrozenCallback(const std_msgs::msg::Bool::ConstSharedPtr &msg);
     void resetCallback(const std_msgs::msg::Bool::ConstSharedPtr &msg);
     void resetTask();
+    void publishTaskActive(bool active);
 
     bool checkCollision();
 

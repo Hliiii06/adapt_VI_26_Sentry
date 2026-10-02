@@ -55,9 +55,12 @@ case "${SCENARIO}" in
   tight_pass)      MODE=1; EXTRA=(yaw_mode:=hold);  DUR=25; GOAL_X=-4.25; GOAL_Y=2.25; CHECK=goal ;;
   collision_block) MODE=1; EXTRA=(yaw_mode:=hold);  DUR=20; GOAL_X=-6.98; GOAL_Y=0.58; CHECK=none ;;
   cancel)          MODE=1; EXTRA=(yaw_mode:=hold);  DUR=25; GOAL_X=-6.0; GOAL_Y=7.5; CHECK=stop; STOP_DEADLINE=1.5; CANCEL_AFTER=4.0 ;;
-  mode2_waypoints) MODE=2; EXTRA=(keypoints_file:=${CFG}/sentry_waypoints.yaml); DUR=35; CHECK=none; SEND_GOAL=false ;;
-  mode3_path)      MODE=3; EXTRA=(reference_path_file:=${CFG}/sentry_reference_path.yaml); DUR=35; CHECK=none; SEND_GOAL=false ;;
-  spin)            MODE=2; EXTRA=(keypoints_file:=${CFG}/sentry_waypoints.yaml yaw_mode:=spin spin_rate:=0.5); DUR=35; CHECK=none; SEND_GOAL=false ;;
+  mode2_waypoints) MODE=2; EXTRA=(keypoints_file:=${CFG}/sentry_waypoints.yaml); DUR=40; CHECK=goal; SEND_GOAL=false
+                   GOAL_X=-6.0; GOAL_Y=7.5; TOL=0.30 ;;
+  mode3_path)      MODE=3; EXTRA=(reference_path_file:=${CFG}/sentry_reference_path.yaml); DUR=40; CHECK=goal; SEND_GOAL=false
+                   GOAL_X=-6.0; GOAL_Y=7.5; TOL=0.30 ;;
+  spin)            MODE=2; EXTRA=(keypoints_file:=${CFG}/sentry_waypoints.yaml yaw_mode:=spin spin_rate:=0.5); DUR=40
+                   CHECK=goal; SEND_GOAL=false; GOAL_X=-6.0; GOAL_Y=7.5; TOL=0.30; MIN_YAW=3.0 ;;
   odom_loss)       MODE=2; EXTRA=(keypoints_file:=${CFG}/sentry_waypoints.yaml); DUR=14; CHECK=stop; STOP_DEADLINE=1.2; SEND_GOAL=false ;;
   gap_wide)        MODE=1; EXTRA=(yaw_mode:=hold); DUR=30; GOAL_X=0.0; GOAL_Y=2.5; CHECK=passage; GATE_Y=1.5; EXPECT=pass
                    INIT_X=0.0; INIT_Y=-1.0; SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/gap_0.80.pcd map_offset_z:=0.0 keep_z_min:=0.0 keep_z_max:=1.2 publish_raw_cloud:=false) ;;
@@ -229,8 +232,10 @@ else
   fi
 
   if [[ "${CHECK}" == "goal" ]]; then
+    YAWARG=""
+    [[ -n "${MIN_YAW:-}" ]] && YAWARG="--min-yaw-travel ${MIN_YAW}"
     if ! python3 scripts/check_passage.py --csv "${OUT}.csv" --gate-y 0.0 \
-         --expect reach --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" --tolerance "${TOL:-0.20}"; then
+         --expect reach --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" --tolerance "${TOL:-0.20}" ${YAWARG}; then
       FAILURES=$((FAILURES+1))
     fi
   fi

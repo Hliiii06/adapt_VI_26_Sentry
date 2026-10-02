@@ -87,6 +87,13 @@ def main():
     if len(tail) < 10:
         print("失败：归零后样本过少（%d），无法证明持续静止" % len(tail))
         return 1
+    # 观察窗必须真的录满：记录提前结束会让"持续静止"变成没被验证。
+    covered = rows[-1][0] - stopped_at
+    required = args.observe * 0.9
+    print("观察窗覆盖 %.2fs（要求 >= %.2fs，即 --observe 的 90%%）" % (covered, required))
+    if covered < required:
+        print("失败：记录未覆盖完整观察时长，无法证明停车后持续静止")
+        return 1
     if re_moved:
         worst = max(re_moved, key=lambda r: norm(r[1], r[2], r[3]))
         print("失败：停车后又重新出现非零命令，t=%.2f 命令 %.3f（共 %d 个样本）"

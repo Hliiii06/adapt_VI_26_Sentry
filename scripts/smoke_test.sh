@@ -10,11 +10,21 @@ mkdir -p "${ROS_HOME}" "${REPO_ROOT}/log/scenarios"
 LOG="${REPO_ROOT}/log/scenarios/smoke_launch.log"
 MODE="${1:-1}"
 
-./scripts/run_sentry_sim.sh start_rviz:=false "navi_mode:=${MODE}" > "${LOG}" 2>&1 &
+# setsid：仿真放进**独立进程组**，清理时只杀本组，不会误杀同一用户的其它实验
+setsid ./scripts/run_sentry_sim.sh start_rviz:=false "navi_mode:=${MODE}" > "${LOG}" 2>&1 &
 LAUNCH_PID=$!
-trap 'kill -INT ${LAUNCH_PID} 2>/dev/null || true' EXIT
+sleep 1
+LAUNCH_PGID="$(ps -o pgid= -p ${LAUNCH_PID} 2>/dev/null | tr -d ' ')"
+cleanup() {
+  if [[ -n "${LAUNCH_PGID}" ]]; then
+    kill -INT -"${LAUNCH_PGID}" 2>/dev/null || true
+    sleep 2
+    kill -KILL -"${LAUNCH_PGID}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
-echo "启动 navi_mode=${MODE}，PID=${LAUNCH_PID}；等待节点就绪..."
+echo "启动 navi_mode=${MODE}，PID=${LAUNCH_PID}，PGID=${LAUNCH_PGID}；等待节点就绪..."
 sleep 25
 
 echo "=== 节点 ==="
@@ -35,13 +45,7 @@ done
 echo "=== 启动日志中的关键行 ==="
 grep -iE "envelope|extrinsic|height filter|tracker ready|simulator ready|error|warn" "${LOG}" | head -30 || true
 
-echo "=== 停止 ==="
-kill -INT "${LAUNCH_PID}" 2>/dev/null || true
-sleep 3
-pkill -f sentry_sim.launch.py 2>/dev/null || true
-pkill -f scan_planner_node 2>/dev/null || true
-pkill -f pcl_render_node 2>/dev/null || true
-pkill -f go2_kinematic_sim 2>/dev/null || true
-pkill -f closed_loop_controller 2>/dev/null || true
-pkill -f map_pub 2>/dev/null || true
+echo "=== 停止（只杀本次进程组 PGID=${LAUNCH_PGID}）==="
+cleanup
+LAUNCH_PGID=""
 echo "完成"

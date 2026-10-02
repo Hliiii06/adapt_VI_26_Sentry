@@ -51,6 +51,8 @@ public:
     odom_timeout_ = declare_parameter<double>("odom_timeout", 0.5);
     start_time_align_limit_ = declare_parameter<double>("start_time_align_limit", 0.5);
     future_time_tolerance_ = declare_parameter<double>("future_time_tolerance", 0.05);
+    allow_missing_start_time_ = declare_parameter<bool>("allow_missing_start_time", false);
+    require_task_authorization_ = declare_parameter<bool>("require_task_authorization", true);
 
     if (yaw_mode_ != "hold" && yaw_mode_ != "align" && yaw_mode_ != "spin")
       throw std::runtime_error("yaw_mode must be 'hold', 'align' or 'spin'");
@@ -68,6 +70,11 @@ public:
     reset_sub_ = create_subscription<std_msgs::msg::Bool>(
         "planning/reset", 10,
         std::bind(&ClosedLoopController::resetCallback, this, std::placeholders::_1));
+    // 任务授权：取消后必须由规划端显式重新授权才允许执行。
+    // 只靠时间戳推断"这条轨迹属于新任务"是不完整的（例如无 start_time 的轨迹）。
+    task_active_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "planning/task_active", rclcpp::QoS(1).reliable().transient_local(),
+        std::bind(&ClosedLoopController::taskActiveCallback, this, std::placeholders::_1));
     cmd_vel_pub_ = create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 20);
     execution_frozen_pub_ = create_publisher<std_msgs::msg::Bool>("planning/go2_execution_frozen", 10);
     cmd_timer_ = create_wall_timer(std::chrono::milliseconds(10),
@@ -76,9 +83,11 @@ public:
     RCLCPP_INFO(get_logger(),
                 "Omnidirectional closed-loop tracker ready: yaw_mode=%s, "
                 "vx=%.2f, vy=%.2f, wz=%.2f, odom_timeout=%.2fs, "
-                "trajectory age limit=%.2fs (older/future trajectories are rejected)",
+                "trajectory age limit=%.2fs (older/future trajectories are rejected), "
+                "require_task_authorization=%s, allow_missing_start_time=%s",
                 yaw_mode_.c_str(), max_vx_, max_vy_, max_vyaw_, odom_timeout_,
-                start_time_align_limit_);
+                start_time_align_limit_, require_task_authorization_ ? "true" : "false",
+                allow_missing_start_time_ ? "true" : "false");
   }
 
 private:
@@ -127,6 +136,22 @@ private:
     traj_.clear();
     traj_duration_ = 0.0;
     exec_time_ = 0.0;
+  }
+
+  void taskActiveCallback(const std_msgs::msg::Bool::ConstSharedPtr msg)
+  {
+    if (task_active_ == msg->data)
+      return;
+    task_active_ = msg->data;
+    if (!task_active_)
+    {
+      // 撤权即刻停车并遗忘轨迹，不等下一条命令。
+      clearTrajectory("task authorization revoked");
+      publishExecutionFrozen(false);
+      publishStop();
+    }
+    RCLCPP_WARN(get_logger(), "Task authorization %s",
+                task_active_ ? "GRANTED" : "REVOKED (execution disabled)");
   }
 
   void resetCallback(const std_msgs::msg::Bool::ConstSharedPtr msg)
@@ -205,8 +230,27 @@ private:
     const rclcpp::Time start_time(msg->start_time);
     if (start_time.seconds() <= 1e-5)
     {
+      // 无 start_time 就无法判断新旧。取消之后必须拒绝（否则绕过取消闩锁）；
+      // 平时也默认拒绝，只有显式 allow_missing_start_time 才接受。
+      if (cancel_time_.seconds() > 1e-5)
+      {
+        RCLCPP_WARN(get_logger(),
+                    "Rejecting trajectory %ld without start_time after a cancel: "
+                    "cannot prove it belongs to a new task",
+                    static_cast<long long>(traj_id_));
+        clearTrajectory("trajectory without start_time received after a cancel");
+        return;
+      }
+      if (!allow_missing_start_time_)
+      {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                             "Rejecting trajectory without start_time "
+                             "(allow_missing_start_time is false)");
+        return;
+      }
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-                           "Trajectory has no start_time; staleness cannot be checked, starting at t=0");
+                           "Trajectory has no start_time; accepted at t=0 because "
+                           "allow_missing_start_time is true");
       exec_time_ = 0.0;
     }
     else
@@ -283,6 +327,15 @@ private:
       return;
     }
 
+    if (require_task_authorization_ && !task_active_)
+    {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Task is not authorized; holding position");
+      publishExecutionFrozen(false);
+      publishStop();
+      return;
+    }
+
     const double odom_age = (current_time - last_odom_time_).seconds();
     if (odom_age < 0.0 || odom_age > odom_timeout_)
     {
@@ -342,6 +395,10 @@ private:
   rclcpp::Subscription<scan_planner_msgs::msg::Bspline>::SharedPtr bspline_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr task_active_sub_;
+  bool task_active_{false};
+  bool allow_missing_start_time_{false};
+  bool require_task_authorization_{true};
   rclcpp::TimerBase::SharedPtr cmd_timer_;
   bool receive_traj_{false};
   bool have_odom_{false};
