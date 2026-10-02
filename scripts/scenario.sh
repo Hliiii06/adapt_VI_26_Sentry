@@ -22,6 +22,7 @@
 #   terrain_ramp10/20/30  合成 10/20/30° 坡，验证 z 跟随地形
 #   terrain_field    真实场地 + 地形分离，Mode 3，z 跟随真实地面（起伏约 0.14 m）
 #   terrain_field_mode1  同上但走 Mode 1（RViz 2D Goal Pose 链路）
+#   terrain_tunnel   穿中央洞口的 Mode 3 路线（当前失败，原因见 docs/testing/tunnel_diagnosis.md）
 set -eo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -72,6 +73,14 @@ case "${SCENARIO}" in
   terrain_field)   MODE=3; EXTRA=(reference_path_file:=${MAPS}/field/field_slope_mode3.yaml)
                    DUR=45; CHECK=terrain; SEND_GOAL=false
                    INIT_X=-11.75; INIT_Y=-7.50; GROUND_GRID="${MAPS}/field/rmuc2026_ground.txt"
+                   SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/field/rmuc2026_obstacles.pcd map_offset_z:=0.0
+                                 keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
+                                 ground_file:=${MAPS}/field/rmuc2026_surface.pcd
+                                 ground_grid_file:=${MAPS}/field/rmuc2026_ground.txt) ;;
+  # 穿中央洞口（Mode 3，路线由碰撞判据逐层生成）
+  terrain_tunnel)  MODE=3; EXTRA=(reference_path_file:=${MAPS}/field/field_tunnel_mode3.yaml)
+                   DUR=70; CHECK=goal; GOAL_X=-0.53; GOAL_Y=-4.00; SEND_GOAL=false; TOL=0.6
+                   INIT_X=-3.75; INIT_Y=4.00
                    SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/field/rmuc2026_obstacles.pcd map_offset_z:=0.0
                                  keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
                                  ground_file:=${MAPS}/field/rmuc2026_surface.pcd
@@ -195,7 +204,7 @@ else
 
   if [[ "${CHECK}" == "goal" ]]; then
     if ! python3 scripts/check_passage.py --csv "${OUT}.csv" --gate-y 0.0 \
-         --expect reach --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" --tolerance 0.20; then
+         --expect reach --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" --tolerance "${TOL:-0.20}"; then
       FAILURES=$((FAILURES+1))
     fi
   fi

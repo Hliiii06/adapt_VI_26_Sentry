@@ -1,0 +1,11 @@
+# 穿中央洞口的参考路线（Mode 3，z=地面；SCAN 再加 body_height 一次）
+# 生成：在 SCAN 碰撞判据下 BFS 连通域 + 视线拉直（每段都验证无阻挡）
+/sentry_sim/reference_path_publisher:
+  ros__parameters:
+    frame_id: world
+    publish_delay_sec: 0.5
+    waypoints:
+      [
+       -3.800, 4.000, 0.062, -5.400, 0.200, 0.104,
+       -5.400, -5.000, 0.038,
+      ]
