@@ -63,6 +63,9 @@ scripts/scenario.sh terrain_tunnel_low  # 可控洞口：低洞应拒绝
 scripts/scenario.sh terrain_lateral    # 横向坡面绕障：规划高度 vs 执行高度
 scripts/scenario.sh cancel_race        # 规划期间取消 + 注入延迟旧授权/新时间戳轨迹
 scripts/scenario.sh goal_out_of_grid   # 目标在已知地面之外：拒绝规划且不动
+# 降低机器人高度做可通行性排查：robot_height 是唯一高度旋钮（派生 body_height
+# 与 z 包络）。见 docs/testing/height_sweep.md
+scripts/run_sentry_sim.sh navi_mode:=1 robot_height:=0.10 ...
 scripts/prepare_terrain_map.py --input ~/pcd_map/rmuc2026_field.pcd \
   --out-prefix docs/testing/maps/field/rmuc2026   # 真实场地地形分离
 

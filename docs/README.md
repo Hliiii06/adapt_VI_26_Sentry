@@ -24,6 +24,9 @@ S0–S3 已在 `src/` 内实施，Codex 第一轮审查发现的 4 项缺陷已�
   以及第二轮对 Codex 审查意见的处理。
 - [S3 结果](testing/s3_results.md)：受控碰撞场景矩阵、三模式与失效停止实测数据、
   独立净空检查、上一轮缺陷与修正、未验证项。
+- [降低高度做可通行性排查](testing/height_sweep.md)：新增 `robot_height` 单一旋钮；
+  低洞扫描显示 H=0.25 几何上过不去、H=0.10 几何上能过但规划器仍 `A-star failed`，
+  即"降高度可分离几何与规划器问题"。
 - [z 向膨胀参数核对与实测](testing/inflation_analysis.md)：上游 `advanced_param.xml`
   确为 up=0.1 / down=0.4；实测减小 down 对过洞无效（阻挡点在机体中心上方），
   有效的是 up；并记录我先前"上游没有这两个参数"的错误结论及其原因。

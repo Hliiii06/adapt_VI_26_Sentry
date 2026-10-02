@@ -98,8 +98,15 @@ def _setup(context):
     ground_grid_file = os.path.expanduser(LaunchConfiguration("ground_grid_file").perform(context))
     ground_file = os.path.expanduser(LaunchConfiguration("ground_file").perform(context))
     robot_radius = float(LaunchConfiguration("robot_radius").perform(context))
-    z_up = float(LaunchConfiguration("inflation_z_up").perform(context))
-    z_down = float(LaunchConfiguration("inflation_z_down").perform(context))
+    # robot_height 是唯一的高度旋钮：机体高 H -> 机体中心离地 H/2，
+    # 碰撞包络上下各 H/2（查询点在机体中心）。inflation_z_* 留空时自动取 H/2，
+    # 这样"降高度验证可通行性"只需改一个参数，不会出现高度与包络不一致。
+    robot_height = float(LaunchConfiguration("robot_height").perform(context))
+    half_h = 0.5 * robot_height
+    z_up_arg = LaunchConfiguration("inflation_z_up").perform(context)
+    z_down_arg = LaunchConfiguration("inflation_z_down").perform(context)
+    z_up = float(z_up_arg) if z_up_arg.strip() else half_h
+    z_down = float(z_down_arg) if z_down_arg.strip() else half_h
     if ground_grid_file and not os.path.isfile(ground_grid_file):
         raise RuntimeError("ground_grid_file 不存在: %s" % ground_grid_file)
     if ground_file and not os.path.isfile(ground_file):
@@ -160,6 +167,7 @@ def _setup(context):
         "grid_map.cloud_is_world": True,
         "grid_map.need_extrinsic": False,
         "grid_map.ground_grid_file": ground_grid_file,
+        "grid_map.body_height": half_h,
         # z 向膨胀：查询点在机体中心，机器人高 0.25 m -> 上下各 0.125 m 才与机体等高。
         # 做成 launch 参数是为了能复现地做对照实验（改小会让碰撞检查**低估**机体，
         # 属于放宽安全边界，不是修 bug）。
@@ -206,8 +214,8 @@ def _setup(context):
                         {"init_x": init_x, "init_y": init_y, "init_z": init_z,
                          "init_yaw": init_yaw, "publish_tf": False,
                          "ground_grid_file": ground_grid_file,
-                         # 实体机体标记的尺寸与碰撞包络同源
-                         "robot_radius": robot_radius}],
+                         # 实体机体标记与机体中心高度都跟 robot_height 一致
+                         "robot_radius": robot_radius, "body_height": half_h}],
         )
     )
 
@@ -268,12 +276,15 @@ def generate_launch_description():
                 "ground_file", default_value="",
                 description="地形表面点云，仅用于 RViz 显示地形起伏"),
             DeclareLaunchArgument(
-                "inflation_z_up", default_value="0.125",
-                description="占据栅格在 z 向**向上**的膨胀（米）。查询点在机体中心，"
-                            "机器人高 0.25 m 时上下各 0.125 才与机体等高"),
+                "robot_height", default_value="0.25",
+                description="机器人总高（米）。决定机体中心高度与碰撞包络："
+                            "上下各 0.5*robot_height。降高度做可通行性排查时只改这一个"),
             DeclareLaunchArgument(
-                "inflation_z_down", default_value="0.125",
-                description="占据栅格在 z 向**向下**的膨胀（米）"),
+                "inflation_z_up", default_value="",
+                description="z 向**向上**膨胀（米）。留空 = robot_height/2"),
+            DeclareLaunchArgument(
+                "inflation_z_down", default_value="",
+                description="z 向**向下**膨胀（米）。留空 = robot_height/2"),
             DeclareLaunchArgument(
                 "robot_radius", default_value="0.26",
                 description="机器人外接半径（米），用于实体机体标记；与碰撞包络同源"),
