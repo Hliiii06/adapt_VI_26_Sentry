@@ -8,6 +8,7 @@
 产出：
     <out>.csv          轨迹（t, x, y, z, yaw, vx_body, vy_body, wz）
     <out>_cmdvel.csv   命令（t, vx, vy, wz）
+    <out>_planned.csv  规划器发布的 B 样条采样（traj_id, start_time, t, x, y, z）
     <out>_meta.txt     key=value：t0_epoch、cancel_t（若有）
     <out>.txt          简要统计
 """
@@ -20,8 +21,9 @@ import sys
 import time
 
 import rclpy
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import Point, PoseStamped, Twist
 from nav_msgs.msg import Odometry
+from scan_planner_msgs.msg import Bspline, TaskAuthorization
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
@@ -56,8 +58,20 @@ class Recorder(Node):
         qos = QoSProfile(depth=200, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.create_subscription(Odometry, f"{NS}/body_pose", self.on_odom, qos)
         self.create_subscription(Twist, f"{NS}/cmd_vel", self.on_cmd, qos)
+        # 记录**规划器发布**的轨迹：用于比较"规划检查的高度"与"实际执行的高度"。
+        self.planned = []
+        self.create_subscription(Bspline, f"{NS}/planning/bspline", self.on_bspline, qos)
         self.goal_pub = self.create_publisher(PoseStamped, f"{NS}/move_base_simple/goal", 1)
         self.reset_pub = self.create_publisher(Bool, f"{NS}/planning/reset", 10)
+        # 必须与执行端订阅(QoS reliable + transient_local)兼容，否则注入的消息根本收不到，
+        # 测试会"通过"但什么都没验证。
+        from rclpy.qos import DurabilityPolicy, HistoryPolicy
+        auth_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                              durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                              history=HistoryPolicy.KEEP_LAST)
+        self.auth_pub = self.create_publisher(
+            TaskAuthorization, f"{NS}/planning/task_active", auth_qos)
+        self.bspline_pub = self.create_publisher(Bspline, f"{NS}/planning/bspline", 10)
 
     def rel(self):
         now = self.get_clock().now().nanoseconds * 1e-9
@@ -66,12 +80,67 @@ class Recorder(Node):
             self.t0_epoch = now
         return now - self.t0
 
+    def on_bspline(self, msg: Bspline):
+        """把收到的 B 样条按 de Boor 求值采样，存下 (traj_id, start_time, t, x, y, z)。"""
+        knots = list(msg.knots)
+        pts = [(p.x, p.y, p.z) for p in msg.pos_pts]
+        p = msg.order - 1
+        n = len(pts) - 1
+        if n < p or len(knots) < n + p + 2:
+            return
+        t0 = msg.start_time.sec + msg.start_time.nanosec * 1e-9
+        lo, hi = knots[p], knots[n + 1]
+        steps = 40
+        for i in range(steps + 1):
+            tt = lo + (hi - lo) * i / steps
+            k = p
+            while k < n and knots[k + 1] <= tt:
+                k += 1
+            k = min(max(k, p), n)
+            d = [list(pts[j + k - p]) for j in range(p + 1)]
+            for r in range(1, p + 1):
+                for j in range(p, r - 1, -1):
+                    denom = knots[j + 1 + k - r] - knots[j + k - p]
+                    alpha = 0.0 if abs(denom) < 1e-12 else (tt - knots[j + k - p]) / denom
+                    d[j] = [d[j - 1][c] * (1 - alpha) + d[j][c] * alpha for c in range(3)]
+            x, y, z = d[p]
+            self.planned.append((msg.traj_id, t0, tt, x, y, z))
+
     def on_cmd(self, msg: Twist):
         t = self.rel()
         self.cmd_peak[0] = max(self.cmd_peak[0], abs(msg.linear.x))
         self.cmd_peak[1] = max(self.cmd_peak[1], abs(msg.linear.y))
         self.cmd_peak[2] = max(self.cmd_peak[2], abs(msg.angular.z))
         self.cmd_samples.append((t, msg.linear.x, msg.linear.y, msg.angular.z))
+
+    def send_stale_authorization(self):
+        msg = TaskAuthorization()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.active = True
+        msg.task_id = 1          # 远小于规划端已撤销到的编号
+        self.auth_pub.publish(msg)
+
+    def send_late_trajectory(self):
+        """构造一条 start_time = 现在（晚于取消时刻）的直线 B 样条并发布。"""
+        if not self.samples:
+            return
+        _, x0, y0, z0, _, _, _, _ = self.samples[-1]
+        msg = Bspline()
+        msg.order = 4
+        msg.traj_id = 999001
+        msg.start_time = self.get_clock().now().to_msg()
+        msg.knots = [float(i) for i in range(12)]
+        pts = []
+        for i in range(8):
+            p = Point()
+            p.x = x0
+            p.y = y0 + 0.30 * i      # 以 0.6 m/s 向 +y 走
+            p.z = z0
+            pts.append(p)
+        msg.pos_pts = pts
+        msg.yaw_pts = [0.0, 0.0]
+        msg.yaw_dt = 1.0
+        self.bspline_pub.publish(msg)
 
     def on_odom(self, msg: Odometry):
         t = self.rel()
@@ -113,6 +182,9 @@ def main():
                         help="true=发送 RViz 目标；false=由 FSM 自行起步（Mode 2/3）")
     parser.add_argument("--cancel-after", type=float, default=-1.0,
                         help=">=0 时：发送目标后等待该秒数再发 planning/reset 取消")
+    parser.add_argument("--inject-stale", action="store_true",
+                        help="取消后注入**延迟到达**的旧授权与一条 start_time 很新的轨迹，"
+                             "用于验证执行端本地锁止后不会被旧任务重新放行")
     parser.add_argument("--post-cancel", type=float, default=8.0,
                         help="取消后的观察时长（必须真正等待，否则会漏检取消后再次运动）")
     args = parser.parse_args()
@@ -157,6 +229,15 @@ def main():
             node.send_reset()
             spin_for(node, 0.2)
         print("[recorder] 已发送 planning/reset，取消时刻 t=%.3fs" % node.cancel_t)
+        if args.inject_stale:
+            # 模拟"取消时规划端还在算"：先注入一条编号很旧、但此时才到达的授权，
+            # 再注入一条 start_time 很新（晚于取消时刻）的轨迹。
+            # 正确的实现必须把两者都拒掉，cmd_vel 保持为零。
+            node.send_stale_authorization()
+            spin_for(node, 0.3)
+            node.send_late_trajectory()
+            spin_for(node, 0.3)
+            print("[recorder] 已注入延迟到达的旧授权 + 晚于取消时刻的轨迹，t=%.3fs" % node.rel())
         spin_for(node, args.post_cancel)
     else:
         spin_for(node, args.duration)
@@ -167,6 +248,10 @@ def main():
         w = csv.writer(f, lineterminator="\n")
         w.writerow(["t", "x", "y", "z", "yaw", "vx_body", "vy_body", "wz"])
         w.writerows(node.samples)
+    with open(args.out + "_planned.csv", "w", newline="") as f:
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow(["traj_id", "start_time", "t", "x", "y", "z"])
+        w.writerows(node.planned)
     with open(args.out + "_cmdvel.csv", "w", newline="") as f:
         w = csv.writer(f, lineterminator="\n")
         w.writerow(["t", "vx", "vy", "wz"])

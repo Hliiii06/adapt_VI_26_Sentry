@@ -10,6 +10,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <scan_planner_msgs/msg/task_authorization.hpp>
 #include <vector>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -105,8 +106,9 @@ namespace scan_planner
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;
     // 任务授权：取消后必须重新授权才允许执行。仅靠时间戳推断新旧任务不完整，
     // 因此增加显式信号；transient_local 保证后启动的执行端也能收到当前状态。
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr task_active_pub_;
+    rclcpp::Publisher<scan_planner_msgs::msg::TaskAuthorization>::SharedPtr task_active_pub_;
     bool task_active_{false};
+    uint32_t task_counter_{0};   // 每接受一个新任务自增，用于让执行端区分新旧授权
     rclcpp::Publisher<scan_planner_msgs::msg::Bspline>::SharedPtr bspline_pub_;
     rclcpp::Publisher<scan_planner_msgs::msg::DataDisp>::SharedPtr data_disp_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr self_inflation_pub_;

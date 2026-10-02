@@ -16,6 +16,7 @@ ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 迁移的调研、实施与
 | T | 地形分离与高度跟随（RViz 可见坡度） | 完成，见 [地形与高度跟随](docs/testing/terrain_following.md) |
 | — | Codex 第一轮审查 | 已完成，发现 4 项缺陷，已修正 |
 | — | Codex 复审 | 已完成，5 项基础缺陷 + 遗留项已修正；见 [地形核对](docs/testing/field_terrain_check.md) |
+| — | Codex 第二轮复审 | 已完成，4 项实现问题已修正；见 [第二轮修正](docs/testing/review_round2_fixes.md) |
 | T2 | 受控洞口场景（高洞过 / 低洞拒） | 完成，见 [真实场地地形核对](docs/testing/field_terrain_check.md) |
 | T3 | RViz 实体显示（地形网格 + 实体机体） | 已实现，**观感待用户验收** |
 | I1–I4 | 接入 VI_26_Sentry 实车 | 未开始，另获授权后进行 |

@@ -54,8 +54,10 @@ namespace scan_planner
     // 地形跟随的 z 参考：让局部轨迹每个点的 z 由同一张地面网格决定，
     // 与运动模拟器的 z 语义一致（不再是起终点之间的线性插值）。
     // 网格未覆盖的点回退到线性参考，并统计数量供告警。
-    void applyTerrainZReference(std::vector<Eigen::Vector3d> &points, double start_z,
+    bool applyTerrainZReference(std::vector<Eigen::Vector3d> &points, double start_z,
                                 double target_z, int &out_of_grid_count);
+    // 优化/时间重分配之后按**新的 XY** 重新赋地形 z；越界返回 false（拒绝规划）。
+    bool applyTerrainZToControlPoints(Eigen::MatrixXd &ctrl_pts, const char *stage);
 
     GroundHeightMap ground_map_;
     bool terrain_following_{false};

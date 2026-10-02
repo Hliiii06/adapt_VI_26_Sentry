@@ -22,6 +22,9 @@
 #   terrain_ramp10/20/30  合成 10/20/30° 上坡
 #   terrain_down     同一 20° 坡反向（下坡）
 #   terrain_crest    上坡->平台->下坡（跨越坡顶）
+#   goal_out_of_grid 目标在已知地面网格之外：必须拒绝规划且机器人不动
+#   cancel_race      规划期间取消 + 注入延迟旧授权与新时间戳轨迹，必须保持静止
+#   terrain_lateral  横向坡面上绕障，检验轨迹高度与实际执行高度一致
 #   terrain_tunnel_high  可控洞口：高洞应通过
 #   terrain_tunnel_low   可控洞口：低洞应拒绝
 #   terrain_field    真实场地 + 地形分离，Mode 3，z 跟随真实地面（起伏约 0.14 m）
@@ -55,7 +58,20 @@ case "${SCENARIO}" in
   mode1_align)     MODE=1; EXTRA=(yaw_mode:=align); DUR=30; GOAL_X=-6.0; GOAL_Y=7.5; CHECK=goal ;;
   tight_pass)      MODE=1; EXTRA=(yaw_mode:=hold);  DUR=25; GOAL_X=-4.25; GOAL_Y=2.25; CHECK=goal ;;
   collision_block) MODE=1; EXTRA=(yaw_mode:=hold);  DUR=20; GOAL_X=-6.98; GOAL_Y=0.58; CHECK=none ;;
-  cancel)          MODE=1; EXTRA=(yaw_mode:=hold);  DUR=25; GOAL_X=-6.0; GOAL_Y=7.5; CHECK=stop; STOP_DEADLINE=1.5; CANCEL_AFTER=4.0 ;;
+  # 目标在已知地面网格之外：必须**拒绝规划**且机器人不动（不把未知区域当可行驶地面）
+  goal_out_of_grid)
+                   MODE=1; EXTRA=(yaw_mode:=hold); DUR=25; GOAL_X=5.0; GOAL_Y=5.0; SEND_GOAL=true
+                   CHECK=no_motion; STOP_DEADLINE=0.20; OBSERVE=8.0
+                   SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/tunnel/tunnel_high.pcd map_offset_z:=0.0
+                                 keep_z_min:=-1.0 keep_z_max:=2.5 publish_raw_cloud:=false
+                                 ground_file:=${MAPS}/tunnel/tunnel_high_ground.pcd
+                                 ground_grid_file:=${MAPS}/tunnel/tunnel_high_ground.txt)
+                   INIT_X=0.0; INIT_Y=-2.0 ;;
+  cancel)          MODE=1; EXTRA=(yaw_mode:=hold);  DUR=25; GOAL_X=-6.0; GOAL_Y=7.5; CHECK=stop; STOP_DEADLINE=1.5; CANCEL_AFTER=4.0
+                   OBSERVE=6.0 ;;
+  # 规划计算期间取消 + 注入延迟到达的旧授权与"新时间戳"轨迹：必须全程保持静止
+  cancel_race)     MODE=1; EXTRA=(yaw_mode:=hold); DUR=25; GOAL_X=-6.0; GOAL_Y=7.5; CHECK=stop
+                   STOP_DEADLINE=0.20; CANCEL_AFTER=0.15; OBSERVE=6.0; INJECT_STALE=1 ;;
   mode2_waypoints) MODE=2; EXTRA=(keypoints_file:=${CFG}/sentry_waypoints.yaml); DUR=40; CHECK=goal; SEND_GOAL=false
                    GOAL_X=-6.0; GOAL_Y=7.5; TOL=0.30 ;;
   mode3_path)      MODE=3; EXTRA=(reference_path_file:=${CFG}/sentry_reference_path.yaml); DUR=40; CHECK=goal; SEND_GOAL=false
@@ -94,6 +110,15 @@ case "${SCENARIO}" in
                                  keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
                                  ground_file:=${MAPS}/field/rmuc2026_surface.pcd
                                  ground_grid_file:=${MAPS}/field/rmuc2026_ground.txt) ;;
+  # 横向高度变化 + 绕障：检验"规划检查的高度"与"实际执行的高度"是否一致
+  terrain_lateral) L=lateral_slope
+                   MODE=3; EXTRA=(reference_path_file:=${MAPS}/lateral/${L}_mode3.yaml)
+                   DUR=45; CHECK=tracked_height; SEND_GOAL=false
+                   INIT_X=0.0; INIT_Y=-1.5
+                   SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/lateral/${L}.pcd map_offset_z:=0.0
+                                 keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
+                                 ground_file:=${MAPS}/lateral/${L}_ground.pcd
+                                 ground_grid_file:=${MAPS}/lateral/${L}_ground.txt) ;;
   # 可控洞口：高洞（洞顶离平台 0.45 m）应当通过
   terrain_tunnel_high)
                    T=tunnel_high
@@ -190,7 +215,7 @@ if [[ "${SCENARIO}" == "odom_loss" ]]; then
   start_sim
   python3 scripts/scenario_test.py --scenario odom_loss --duration "${DUR}" --out "${OUT}" \
     --send-goal "${SEND_GOAL}" --cancel-after "${CANCEL_AFTER}" \
-    > "${OUT}_recorder.log" 2>&1 &
+    ${INJECT_STALE:+--inject-stale} > "${OUT}_recorder.log" 2>&1 &
   REC_PID=$!
   sleep 8
   EVENT_EPOCH="$(date +%s.%N)"
@@ -205,7 +230,7 @@ if [[ "${SCENARIO}" == "odom_loss" ]]; then
   else
     EVENT_T="$(python3 -c "print(f'{${EVENT_EPOCH} - ${T0_EPOCH}:.4f}')")"
     if ! python3 scripts/check_stop.py --csv "${OUT}_cmdvel.csv" --event-t "${EVENT_T}" \
-         --deadline "${STOP_DEADLINE}" --observe 4.0 --label "里程计断流"; then
+         --deadline "${STOP_DEADLINE}" --observe "${OBSERVE:-4.0}" --label "里程计断流"; then
       FAILURES=$((FAILURES+1))
     fi
   fi
@@ -214,7 +239,7 @@ else
   python3 scripts/scenario_test.py --scenario "${SCENARIO}" --duration "${DUR}" \
     --goal-x "${GOAL_X:--6.0}" --goal-y "${GOAL_Y:-7.5}" --out "${OUT}" \
     --send-goal "${SEND_GOAL}" --cancel-after "${CANCEL_AFTER}" \
-    > "${OUT}_recorder.log" 2>&1 &
+    ${INJECT_STALE:+--inject-stale} > "${OUT}_recorder.log" 2>&1 &
   REC_PID=$!
   sleep 1
   start_sim
@@ -226,7 +251,19 @@ else
     if [[ -z "${CANCEL_T}" ]]; then
       echo "失败：缺少 meta 中的 cancel_t"; FAILURES=$((FAILURES+1))
     elif ! python3 scripts/check_stop.py --csv "${OUT}_cmdvel.csv" --event-t "${CANCEL_T}" \
-           --deadline "${STOP_DEADLINE}" --observe 6.0 --label "取消"; then
+           --deadline "${STOP_DEADLINE}" --observe "${OBSERVE:-6.0}" --label "取消"; then
+      FAILURES=$((FAILURES+1))
+    fi
+  fi
+
+  if [[ "${CHECK}" == "no_motion" ]]; then
+    # 既要求机器人不动，也要求日志里确实出现了越界拒绝——否则"没动"可能只是没收到目标。
+    if ! python3 scripts/check_no_motion.py --csv "${OUT}_cmdvel.csv" \
+         --duration "${OBSERVE:-8.0}" --label "越界拒绝"; then
+      FAILURES=$((FAILURES+1))
+    fi
+    if ! grep -q "outside the known ground grid" "${OUT}_launch.log"; then
+      echo "失败：日志中没有出现越界拒绝，无法区分拒绝规划与没收到目标"
       FAILURES=$((FAILURES+1))
     fi
   fi
@@ -243,6 +280,16 @@ else
          --body-height 0.125 --expect "${TERRAIN_EXPECT}" \
          --min-rise "${MIN_RISE:-0.10}" --min-drop "${MIN_DROP:-0.10}" \
          --goal-x "${GOAL_X}" --goal-y "${GOAL_Y}" --goal-tolerance "${TOL:-0.60}"; then
+      FAILURES=$((FAILURES+1))
+    fi
+  fi
+
+  if [[ "${CHECK}" == "tracked_height" ]]; then
+    if ! python3 scripts/check_tracked_height.py --csv "${OUT}.csv" \
+         --ground-grid "${MAPS}/lateral/lateral_slope_ground.txt" \
+         --obstacles "${MAPS}/lateral/lateral_slope.pcd" \
+         --body-height 0.125 --radius 0.26 --planned "${OUT}_planned.csv" \
+         --min-lateral 0.30 --min-height-change 0.05 --require-counterfactual; then
       FAILURES=$((FAILURES+1))
     fi
   fi

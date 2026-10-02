@@ -26,6 +26,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <scan_planner_msgs/msg/bspline.hpp>
+#include <scan_planner_msgs/msg/task_authorization.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2/utils.h>
@@ -72,7 +73,7 @@ public:
         std::bind(&ClosedLoopController::resetCallback, this, std::placeholders::_1));
     // 任务授权：取消后必须由规划端显式重新授权才允许执行。
     // 只靠时间戳推断"这条轨迹属于新任务"是不完整的（例如无 start_time 的轨迹）。
-    task_active_sub_ = create_subscription<std_msgs::msg::Bool>(
+    task_active_sub_ = create_subscription<scan_planner_msgs::msg::TaskAuthorization>(
         "planning/task_active", rclcpp::QoS(1).reliable().transient_local(),
         std::bind(&ClosedLoopController::taskActiveCallback, this, std::placeholders::_1));
     cmd_vel_pub_ = create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 20);
@@ -138,20 +139,54 @@ private:
     exec_time_ = 0.0;
   }
 
-  void taskActiveCallback(const std_msgs::msg::Bool::ConstSharedPtr msg)
+  void taskActiveCallback(const scan_planner_msgs::msg::TaskAuthorization::ConstSharedPtr msg)
   {
-    if (task_active_ == msg->data)
-      return;
-    task_active_ = msg->data;
-    if (!task_active_)
+    if (msg->task_id > last_task_id_)
+      last_task_id_ = msg->task_id;
+
+    if (!msg->active)
     {
-      // 撤权即刻停车并遗忘轨迹，不等下一条命令。
-      clearTrajectory("task authorization revoked");
-      publishExecutionFrozen(false);
-      publishStop();
+      // 规划端撤权：本地锁止到该编号，之后编号不大于它的授权一律不放行。
+      if (msg->task_id > revoked_up_to_)
+        revoked_up_to_ = msg->task_id;
+      if (task_active_)
+      {
+        task_active_ = false;
+        clearTrajectory("task authorization revoked by planner");
+        publishExecutionFrozen(false);
+        publishStop();
+      }
+      RCLCPP_WARN(get_logger(), "Task authorization REVOKED by planner (task_id=%u)",
+                  msg->task_id);
+      return;
     }
-    RCLCPP_WARN(get_logger(), "Task authorization %s",
-                task_active_ ? "GRANTED" : "REVOKED (execution disabled)");
+
+    // 只接受**编号大于已撤销编号**的授权。取消之前发布、延迟到达的旧授权
+    // 编号不会更大，因此不会把已锁止的执行端重新放行。
+    if (msg->task_id <= revoked_up_to_)
+    {
+      RCLCPP_WARN(get_logger(),
+                  "Ignoring stale task authorization task_id=%u (revoked up to %u)",
+                  msg->task_id, revoked_up_to_);
+      return;
+    }
+
+    if (task_active_)
+      return;
+    task_active_ = true;
+    RCLCPP_WARN(get_logger(), "Task authorization GRANTED (task_id=%u)", msg->task_id);
+  }
+
+  /// 收到取消时**立即在本地锁止**，不等规划端发布撤权。
+  /// 否则规划端还在计算的旧任务会发布一条 start_time 晚于取消时刻的轨迹，
+  /// 在本端看来是"新"的并被接受——这正是此前遗留的竞态窗口。
+  void lockOutLocally(const char *reason)
+  {
+    if (last_task_id_ > revoked_up_to_)
+      revoked_up_to_ = last_task_id_;
+    task_active_ = false;
+    RCLCPP_WARN(get_logger(), "Local execution lockout (%s); revoked up to task_id=%u",
+                reason, revoked_up_to_);
   }
 
   void resetCallback(const std_msgs::msg::Bool::ConstSharedPtr msg)
@@ -161,6 +196,9 @@ private:
     // 记录取消时刻：此后到达的、start_time 早于该时刻的轨迹一律拒绝，
     // 防止取消前发出、取消后才送达的在途轨迹重新驱动机器人。
     cancel_time_ = now();
+    // 先本地锁止执行授权，再清轨迹：规划端若仍在计算旧任务，其随后发布的
+    // 轨迹与授权都不能再让本端动起来（Codex 第二轮指出的竞态窗口）。
+    lockOutLocally("cancel received");
     clearTrajectory("reset requested; stopping and forgetting the active trajectory");
     publishExecutionFrozen(false);
     publishStop();
@@ -395,7 +433,9 @@ private:
   rclcpp::Subscription<scan_planner_msgs::msg::Bspline>::SharedPtr bspline_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reset_sub_;
-  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr task_active_sub_;
+  rclcpp::Subscription<scan_planner_msgs::msg::TaskAuthorization>::SharedPtr task_active_sub_;
+  uint32_t last_task_id_{0};    // 见过的最大任务编号
+  uint32_t revoked_up_to_{0};   // 已撤销到的编号；只有更大编号的授权才放行
   bool task_active_{false};
   bool allow_missing_start_time_{false};
   bool require_task_authorization_{true};

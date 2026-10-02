@@ -98,7 +98,7 @@ namespace scan_planner
     reset_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
         "planning/reset", 10,
         std::bind(&SCANReplanFSM::resetCallback, this, std::placeholders::_1));
-    task_active_pub_ = node_->create_publisher<std_msgs::msg::Bool>(
+    task_active_pub_ = node_->create_publisher<scan_planner_msgs::msg::TaskAuthorization>(
         "planning/task_active", rclcpp::QoS(1).reliable().transient_local());
     publishTaskActive(false);
 
@@ -464,11 +464,17 @@ namespace scan_planner
   {
     if (task_active_ == active && !active)
       return;  // 已处于未授权状态时不必重复发布
+    if (active)
+      ++task_counter_;   // 新任务：编号自增，执行端据此拒绝延迟到达的旧授权
     task_active_ = active;
-    std_msgs::msg::Bool msg;
-    msg.data = active;
+    scan_planner_msgs::msg::TaskAuthorization msg;
+    msg.header.stamp = node_->now();
+    msg.header.frame_id = "world";
+    msg.active = active;
+    msg.task_id = task_counter_;
     task_active_pub_->publish(msg);
-    RCLCPP_INFO(node_->get_logger(), "Task authorization: %s", active ? "GRANTED" : "REVOKED");
+    RCLCPP_INFO(node_->get_logger(), "Task authorization: %s (task_id=%u)",
+                active ? "GRANTED" : "REVOKED", task_counter_);
   }
 
   void SCANReplanFSM::resetCallback(const std_msgs::msg::Bool::ConstSharedPtr &msg)

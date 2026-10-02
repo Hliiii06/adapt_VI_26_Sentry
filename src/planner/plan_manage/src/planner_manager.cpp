@@ -39,17 +39,17 @@ namespace scan_planner
     }
   } // namespace
 
-  void SCANPlannerManager::applyTerrainZReference(std::vector<Eigen::Vector3d> &points,
+  bool SCANPlannerManager::applyTerrainZReference(std::vector<Eigen::Vector3d> &points,
                                                   const double start_z, const double target_z,
                                                   int &out_of_grid_count)
   {
     out_of_grid_count = 0;
     if (points.empty())
-      return;
+      return true;
     if (points.size() == 1)
     {
       points.front()(2) = start_z;
-      return;
+      return ground_map_.contains(points.front()(0), points.front()(1));
     }
 
     // 线性参考：仅用于网格未覆盖的点（**不把未知区域当成延伸出去的可行驶地面**）
@@ -69,16 +69,46 @@ namespace scan_planner
     {
       const double x = points[i](0);
       const double y = points[i](1);
-      if (ground_map_.contains(x, y))
-        points[i](2) = ground_map_.heightAt(x, y) + body_height_;
-      else
+      if (!ground_map_.contains(x, y))
       {
+        // **不把未知区域当成可行驶地面**：越界点回退到线性高度只是为了给出
+        // 一个可诊断的中间结果，调用方必须据此拒绝整条轨迹。
         points[i](2) = linear[i];
         ++out_of_grid_count;
+        continue;
       }
+      points[i](2) = ground_map_.heightAt(x, y) + body_height_;
     }
     // 起点必须与当前状态连续，避免轨迹一开始就跳。
     points.front()(2) = start_z;
+    return out_of_grid_count == 0;
+  }
+
+  bool SCANPlannerManager::applyTerrainZToControlPoints(Eigen::MatrixXd &ctrl_pts,
+                                                        const char *stage)
+  {
+    if (!terrain_following_ || ctrl_pts.cols() == 0)
+      return true;
+    // 优化会改变 XY，因此必须在**优化之后**按新的 XY 重新查询地面高度，
+    // 否则绕障后的轨迹 z 仍沿用优化前的位置，与模拟车体高度不一致。
+    for (int i = 0; i < ctrl_pts.cols(); ++i)
+    {
+      const double x = ctrl_pts(0, i);
+      const double y = ctrl_pts(1, i);
+      if (!ground_map_.contains(x, y))
+      {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+                             "Rejecting %s trajectory: control point %d at (%.2f, %.2f) is "
+                             "outside the known ground grid x[%.2f,%.2f] y[%.2f,%.2f]; "
+                             "unknown ground is not treated as drivable",
+                             stage, i, x, y, ground_map_.minX(), ground_map_.maxX(),
+                             ground_map_.minY(), ground_map_.maxY());
+        return false;
+      }
+    }
+    for (int i = 0; i < ctrl_pts.cols(); ++i)
+      ctrl_pts(2, i) = ground_map_.heightAt(ctrl_pts(0, i), ctrl_pts(1, i)) + body_height_;
+    return true;
   }
 
   // SECTION interfaces for setup and query
@@ -314,12 +344,15 @@ namespace scan_planner
     if (terrain_following_)
     {
       int out_of_grid = 0;
-      applyTerrainZReference(point_set, start_pt(2), local_target_pt(2), out_of_grid);
-      if (out_of_grid > 0)
+      if (!applyTerrainZReference(point_set, start_pt(2), local_target_pt(2), out_of_grid))
+      {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
-                             "Terrain z reference: %d of %zu initial points fall outside the ground "
-                             "grid; those use the linear reference instead of unknown terrain",
+                             "Rejecting trajectory: %d of %zu initial points are outside the "
+                             "known ground grid; unknown ground is not treated as drivable",
                              out_of_grid, point_set.size());
+        continuous_failures_count_++;
+        return false;
+      }
     }
     else
     {
@@ -351,6 +384,13 @@ namespace scan_planner
     }
     //visualization_->displayOptimalList( ctrl_pts, vis_id );
 
+    // 优化改了 XY：按新的位置重新查询地形，并拒绝越界轨迹。
+    if (!applyTerrainZToControlPoints(ctrl_pts, "optimized"))
+    {
+      continuous_failures_count_++;
+      return false;
+    }
+
     t_opt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
     t_start = std::chrono::steady_clock::now();
 
@@ -367,7 +407,15 @@ namespace scan_planner
       Eigen::MatrixXd optimal_control_points;
       flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points);
       if (flag_step_2_success)
+      {
+        // 时间重分配也会改变控制点位置，必须再按地形修正一次。
+        if (!applyTerrainZToControlPoints(optimal_control_points, "refined"))
+        {
+          continuous_failures_count_++;
+          return false;
+        }
         pos = UniformBspline(optimal_control_points, 3, ts);
+      }
     }
 
     if (!flag_step_2_success || !checkDynamicFeasibility(pos))

@@ -47,6 +47,8 @@ public:
         throw std::runtime_error("ground_grid_file could not be loaded: " + ground_file);
       terrain_following_ = true;
       z_ = ground_map_.heightAt(x_, y_) + body_height_;
+      last_valid_x_ = x_;
+      last_valid_y_ = y_;
       RCLCPP_INFO(get_logger(),
                   "Terrain following ENABLED from %s: ground z in [%.3f, %.3f] m over a "
                   "%.2f m grid; body height %.3f m",
@@ -63,9 +65,13 @@ public:
     body_marker_.header.frame_id = "world";
     body_marker_.ns = "robot_body";
     body_marker_.id = 0;
-    body_marker_.type = visualization_msgs::msg::Marker::CUBE;
+    // 必须与碰撞包络**几何一致**：包络是半径 robot_radius 的竖直圆柱，
+    // 所以显示也用同样半径的圆柱。用边长 2r 的方块是错的——方块角点到中心
+    // 距离为 r*sqrt(2)（0.26 -> 0.368 m），四角会露在包络之外，
+    // 出现"画面里车角碰墙、规划器却认为安全"的假象。
+    body_marker_.type = visualization_msgs::msg::Marker::CYLINDER;
     body_marker_.action = visualization_msgs::msg::Marker::ADD;
-    // 机体是 0.25 m 高的方块：CUBE 的 scale.z 用**全高**，位置放在机体中心
+    // CYLINDER 的 scale.x/y 是直径，scale.z 是全高；位置在机体中心
     body_marker_.scale.x = 2.0 * robot_radius_;
     body_marker_.scale.y = 2.0 * robot_radius_;
     body_marker_.scale.z = 2.0 * body_height_;
@@ -198,24 +204,39 @@ private:
     const double s = std::sin(yaw_);
     vx_world_ = c * vx_applied_ - s * vy_applied_;
     vy_world_ = s * vx_applied_ + c * vy_applied_;
-    x_ += vx_world_ * dt;
-    y_ += vy_world_ * dt;
+    const double next_x = x_ + vx_world_ * dt;
+    const double next_y = y_ + vy_world_ * dt;
+    if (terrain_following_ && !ground_map_.contains(next_x, next_y))
+    {
+      // **停在边界上，不进入未知区域。** 只保持高度继续走仍然是把未知区域当成了
+      // 可行驶地面；这里直接把位置钉在最后一个已知点并清零速度。
+      ++out_of_grid_events_;
+      x_ = last_valid_x_;
+      y_ = last_valid_y_;
+      vx_applied_ = 0.0;
+      vy_applied_ = 0.0;
+      vx_world_ = 0.0;
+      vy_world_ = 0.0;
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Robot reached the edge of the known ground grid "
+                           "(x[%.2f,%.2f] y[%.2f,%.2f]) at (%.2f, %.2f); holding position "
+                           "instead of driving into unknown ground (%d events)",
+                           ground_map_.minX(), ground_map_.maxX(),
+                           ground_map_.minY(), ground_map_.maxY(),
+                           x_, y_, out_of_grid_events_);
+    }
+    else
+    {
+      x_ = next_x;
+      y_ = next_y;
+    }
     if (terrain_following_)
     {
-      // 越界时保持上一次有效高度并告警：**不能把网格外的未知区域当成延伸出去的地面**。
-      if (ground_map_.contains(x_, y_))
-      {
-        z_ = ground_map_.heightAt(x_, y_) + body_height_;
-      }
-      else
-      {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                             "Robot at (%.2f, %.2f) is outside the ground grid "
-                             "(x[%.2f,%.2f] y[%.2f,%.2f]); holding last valid z=%.3f instead of "
-                             "extrapolating unknown terrain",
-                             x_, y_, ground_map_.minX(), ground_map_.maxX(),
-                             ground_map_.minY(), ground_map_.maxY(), z_);
-      }
+      z_ = ground_map_.heightAt(x_, y_) + body_height_;
+      last_valid_x_ = x_;
+      last_valid_y_ = y_;
+      last_valid_x_ = x_;
+      last_valid_y_ = y_;
     }
     yaw_ = normalizeAngle(yaw_ + wz_applied_ * dt);
     publishOdom(current_time);
@@ -236,6 +257,8 @@ private:
   bool terrain_following_{false};
   double body_height_{0.125};
   double robot_radius_{0.26};
+  double last_valid_x_{0.0}, last_valid_y_{0.0};
+  long out_of_grid_events_{0};
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr body_marker_pub_;
   visualization_msgs::msg::Marker body_marker_;
   GroundHeightMap ground_map_;

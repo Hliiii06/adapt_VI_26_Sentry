@@ -24,6 +24,9 @@ S0–S3 已在 `src/` 内实施，Codex 第一轮审查发现的 4 项缺陷已�
   以及第二轮对 Codex 审查意见的处理。
 - [S3 结果](testing/s3_results.md)：受控碰撞场景矩阵、三模式与失效停止实测数据、
   独立净空检查、上一轮缺陷与修正、未验证项。
+- [Codex 第二轮复审修正](testing/review_round2_fixes.md)：优化后才赋地形高度、
+  显示与包络几何一致、取消立即本地锁止 + 授权带 task_id、越界拒绝规划/停在边界、
+  停车判据改完整时长；含 cancel_race / goal_out_of_grid / terrain_lateral 三个新场景。
 - [真实场地地形核对](testing/field_terrain_check.md)：用户给的三处地形坐标逐处核对，
   **更正了 tunnel_diagnosis.md 前面过于确定的"被坎隔开"结论**；含受控洞口场景
   （高洞通过 / 低洞拒绝）与判据推导（阈值为 0.25 m，不是 0.375 m）。

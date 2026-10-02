@@ -87,12 +87,24 @@ def main():
     if len(tail) < 10:
         print("失败：归零后样本过少（%d），无法证明持续静止" % len(tail))
         return 1
-    # 观察窗必须真的录满：记录提前结束会让"持续静止"变成没被验证。
+    # 观察窗必须**完整**录满（不再打折到 90%）：记录提前结束会让"持续静止"
+    # 变成没被验证，而报告却写成完整观察。同时检查中间是否长时间缺样——
+    # 一段长时间没有样本，等于该时段根本没有被观测。
     covered = rows[-1][0] - stopped_at
-    required = args.observe * 0.9
-    print("观察窗覆盖 %.2fs（要求 >= %.2fs，即 --observe 的 90%%）" % (covered, required))
-    if covered < required:
+    print("观察窗覆盖 %.2fs（要求 >= %.2fs，完整时长）" % (covered, args.observe))
+    if covered < args.observe:
         print("失败：记录未覆盖完整观察时长，无法证明停车后持续静止")
+        return 1
+    window = [r for r in rows if r[0] >= stopped_at]
+    times = [r[0] for r in window]
+    dts = sorted(times[i + 1] - times[i] for i in range(len(times) - 1))
+    median_dt = dts[len(dts) // 2] if dts else 0.0
+    worst_gap = dts[-1] if dts else 0.0
+    gap_limit = max(0.25, 5.0 * median_dt)
+    print("采样间隔 中位 %.4fs，最大 %.4fs（允许 <= %.4fs）"
+          % (median_dt, worst_gap, gap_limit))
+    if worst_gap > gap_limit:
+        print("失败：观察窗中间有 %.3fs 缺样，该时段未被观测" % worst_gap)
         return 1
     if re_moved:
         worst = max(re_moved, key=lambda r: norm(r[1], r[2], r[3]))
