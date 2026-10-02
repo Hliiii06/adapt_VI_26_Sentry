@@ -11,6 +11,8 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
+#include "plan_manage/ground_height_map.h"
+
 namespace scan_planner
 {
 class Go2KinematicSim : public rclcpp::Node
@@ -32,6 +34,22 @@ public:
     publish_tf_ = declare_parameter<bool>("publish_tf", false);
     frame_id_ = declare_parameter<std::string>("frame_id", "world");
     child_frame_id_ = declare_parameter<std::string>("child_frame_id", "base");
+    // 地形跟随：给出地面高度网格后，z 由「地面 + 机体中心高度」决定，而不是固定值。
+    // 地面机器人不控制 z（z 是地形的结果），所以这里由地形推导，而不是抄轨迹的 z。
+    const std::string ground_file = declare_parameter<std::string>("ground_grid_file", "");
+    body_height_ = declare_parameter<double>("body_height", 0.125);
+    if (!ground_file.empty())
+    {
+      if (!ground_map_.load(ground_file))
+        throw std::runtime_error("ground_grid_file could not be loaded: " + ground_file);
+      terrain_following_ = true;
+      z_ = ground_map_.heightAt(x_, y_) + body_height_;
+      RCLCPP_INFO(get_logger(),
+                  "Terrain following ENABLED from %s: ground z in [%.3f, %.3f] m over a "
+                  "%.2f m grid; body height %.3f m",
+                  ground_file.c_str(), ground_map_.minHeight(), ground_map_.maxHeight(),
+                  ground_map_.cell(), body_height_);
+    }
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("body_pose", 100);
@@ -44,9 +62,10 @@ public:
         std::bind(&Go2KinematicSim::simCallback, this));
     RCLCPP_INFO(get_logger(),
                 "Holonomic kinematic simulator ready: init=(%.2f, %.2f, %.2f) yaw=%.2f, "
-                "limits vx=%.2f vy=%.2f wz=%.2f, acc xy=%.2f yaw=%.2f, cmd_timeout=%.2fs",
+                "limits vx=%.2f vy=%.2f wz=%.2f, acc xy=%.2f yaw=%.2f, cmd_timeout=%.2fs, "
+                "terrain_following=%s",
                 x_, y_, z_, yaw_, max_vx_, max_vy_, max_vyaw_, max_acc_xy_, max_acc_yaw_,
-                cmd_timeout_);
+                cmd_timeout_, terrain_following_ ? "true" : "false");
   }
 
 private:
@@ -149,6 +168,8 @@ private:
     vy_world_ = s * vx_applied_ + c * vy_applied_;
     x_ += vx_world_ * dt;
     y_ += vy_world_ * dt;
+    if (terrain_following_)
+      z_ = ground_map_.heightAt(x_, y_) + body_height_;
     yaw_ = normalizeAngle(yaw_ + wz_applied_ * dt);
     publishOdom(current_time);
   }
@@ -164,6 +185,9 @@ private:
   double max_acc_xy_{0.0}, max_acc_yaw_{0.0};
   double vx_applied_{0.0}, vy_applied_{0.0}, wz_applied_{0.0};
   bool publish_tf_{false};
+  bool terrain_following_{false};
+  double body_height_{0.125};
+  GroundHeightMap ground_map_;
   std::string frame_id_, child_frame_id_;
   rclcpp::Time last_cmd_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_sim_time_{0, 0, RCL_ROS_TIME};

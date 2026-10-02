@@ -39,6 +39,11 @@ public:
                                                    std::numeric_limits<double>::infinity());
     // 是否额外发布未过滤的原始点云，供 RViz 对照查看被删掉了什么。
     const bool publish_raw = declare_parameter<bool>("publish_raw_cloud", false);
+    // 地形表面点云（prepare_terrain_map.py 产出的 *_surface.pcd）。
+    // **仅供 RViz 显示地形起伏**：地面点绝不能喂给 SCAN 的占据栅格，否则地面自身
+    // 会被判成障碍。机器人的高度来自 ground_grid_file 查询，不走这条话题。
+    const std::string ground_file = declare_parameter<std::string>("ground_file", "");
+    ground_offset_z_ = declare_parameter<double>("ground_offset_z", 0.0);
 
     pcl::PointCloud<pcl::PointXYZ> cloud;
     if (pcl::io::loadPCDFile(file_name, cloud) != 0)
@@ -61,14 +66,19 @@ public:
         if (point.z >= z_min && point.z <= z_max)
           filtered.push_back(point);
       const size_t removed = cloud.size() - filtered.size();
-      RCLCPP_WARN(get_logger(),
-                  "DEMO MAP: cut points outside z=[%.3f, %.3f] m (after map_offset_z=%.3f) -> "
-                  "removed %zu of %zu points (%.1f%%). This is an absolute-height cut, NOT ground "
-                  "segmentation: everything below %.3f m in the ORIGINAL PCD is gone, including "
-                  "real low structures. Not for real-robot use.",
-                  z_min, z_max, offset_z, removed, loaded_points,
-                  100.0 * static_cast<double>(removed) / std::max<size_t>(1, loaded_points),
-                  z_min - offset_z);
+      const double removed_pct =
+          100.0 * static_cast<double>(removed) / std::max<size_t>(1, loaded_points);
+      // 只有真的删了点才告警；地形剖面的宽阈值只是为了不删任何东西。
+      if (removed > 0)
+        RCLCPP_WARN(get_logger(),
+                    "DEMO MAP: cut points outside z=[%.3f, %.3f] m (after map_offset_z=%.3f) -> "
+                    "removed %zu of %zu points (%.1f%%). This is an absolute-height cut, NOT "
+                    "ground segmentation: everything below %.3f m in the ORIGINAL PCD is gone, "
+                    "including real low structures. Not for real-robot use.",
+                    z_min, z_max, offset_z, removed, loaded_points, removed_pct, z_min - offset_z);
+      else
+        RCLCPP_INFO(get_logger(),
+                    "Height window z=[%.3f, %.3f] m removed no points", z_min, z_max);
       cloud.swap(filtered);
     }
     if (cloud.empty())
@@ -102,6 +112,22 @@ public:
                   "Publishing unfiltered reference cloud on global_cloud_raw (%zu points)",
                   raw_cloud.size());
     }
+    if (!ground_file.empty())
+    {
+      pcl::PointCloud<pcl::PointXYZ> ground_cloud;
+      if (pcl::io::loadPCDFile(ground_file, ground_cloud) != 0)
+        throw std::runtime_error("failed to load ground PCD file: " + ground_file);
+      for (auto &point : ground_cloud)
+        point.z += ground_offset_z_;
+      pcl::toROSMsg(ground_cloud, ground_message_);
+      ground_message_.header.frame_id = frame_id_;
+      ground_publisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+          "ground_surface", rclcpp::QoS(1).reliable().transient_local());
+      RCLCPP_INFO(get_logger(),
+                  "Publishing terrain surface on ground_surface (%zu points) — "
+                  "visualisation only, NOT fed to the planner",
+                  ground_cloud.size());
+    }
     timer_ = create_wall_timer(
         std::chrono::duration<double>(1.0 / std::max(0.1, publish_rate)),
         std::bind(&MapPublisher::publishMap, this));
@@ -119,12 +145,20 @@ private:
       raw_message_.header.stamp = message_.header.stamp;
       raw_publisher_->publish(raw_message_);
     }
+    if (ground_publisher_)
+    {
+      ground_message_.header.stamp = message_.header.stamp;
+      ground_publisher_->publish(ground_message_);
+    }
   }
   std::string frame_id_;
+  double ground_offset_z_{0.0};
   sensor_msgs::msg::PointCloud2 message_;
   sensor_msgs::msg::PointCloud2 raw_message_;
+  sensor_msgs::msg::PointCloud2 ground_message_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr publisher_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr raw_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr ground_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

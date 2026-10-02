@@ -48,6 +48,19 @@ namespace scan_planner
     self_safety_margin_ = load_parameter<double>(node_, "grid_map.safety_margin", 0.0);
     self_double_cylinder_offset_ = load_parameter<double>(node_, "grid_map.double_cylinder_offset", 0.0);
     body_height_ = load_parameter<double>(node_, "grid_map.body_height", 0.0);
+    const std::string ground_grid_file =
+        load_parameter<std::string>(node_, "grid_map.ground_grid_file", std::string(""));
+    if (!ground_grid_file.empty())
+    {
+      if (!ground_map_.load(ground_grid_file))
+        throw std::runtime_error("grid_map.ground_grid_file could not be loaded: " + ground_grid_file);
+      terrain_following_ = true;
+      RCLCPP_INFO(node_->get_logger(),
+                  "Terrain following ENABLED from %s: ground z in [%.3f, %.3f] m, "
+                  "body height %.3f m; Mode 1 goal height will follow the terrain",
+                  ground_grid_file.c_str(), ground_map_.minHeight(), ground_map_.maxHeight(),
+                  body_height_);
+    }
     self_inflation_frame_id_ = load_parameter<std::string>(node_, "grid_map.frame_id", "world");
 
     if (navi_mode_ == NAVI_MODE::PRESET_TARGET)
@@ -163,6 +176,16 @@ namespace scan_planner
 
     bool success = false;
     end_pt_ << msg->poses[0].pose.position.x, msg->poses[0].pose.position.y, rviz_goal_height_;
+    if (terrain_following_)
+    {
+      // 地面机器人不控制 z：目标高度取目标处地面 + 机体高度。
+      const double goal_z = ground_map_.heightAt(end_pt_(0), end_pt_(1)) + body_height_;
+      RCLCPP_INFO(node_->get_logger(),
+                  "Terrain following: goal (%.2f, %.2f) ground z=%.3f -> goal z=%.3f "
+                  "(replacing rviz_goal_height %.3f)",
+                  end_pt_(0), end_pt_(1), goal_z - body_height_, goal_z, rviz_goal_height_);
+      end_pt_(2) = goal_z;
+    }
     success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), end_pt_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 
     if (success)

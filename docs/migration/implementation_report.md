@@ -31,6 +31,29 @@ Codex 审查认为方向正确但**不能认定 S0–S3 已验收**，并提出 
 新增脚本：`scripts/check_stop.py`（停车判据）、`scripts/check_passage.py`（通过/拒绝判据）、
 `scripts/make_test_maps.py`（合成地图）、`scripts/summarize_launch_log.sh`（日志摘要）。
 
+## 第三轮：地形分离与高度跟随
+
+用户验收 RViz 后反馈"坡度不明显"。排查确认根因不是 RViz 也不是缺 Gazebo：
+**运动模拟器的 z 恒定、且上一版绝对高度删点把地面整层删掉了**（631508 点只留 177762）。
+详见 [地形分离与高度跟随](../testing/terrain_following.md)。
+
+改动：
+
+| 文件 | 改动 |
+|---|---|
+| `scripts/prepare_terrain_map.py`（新） | 本地地面估计：每格低分位数 + 稳健迭代拟合二次曲面（RMS 0.05 m），障碍 = 高于地面 ≥ 0.08 m；输出障碍云 / 地形表面 / 地面网格 |
+| `plan_manage/include/plan_manage/ground_height_map.h`（新） | 地面高度网格加载与双线性查询，供模拟器与 FSM 共用 |
+| `plan_manage/src/go2_kinematic_sim.cpp` | 新增 `ground_grid_file`/`body_height`；z = 地面(x,y) + body_height（由地形推导，不抄轨迹 z） |
+| `plan_manage/src/scan_replan_fsm.cpp`、头文件 | 新增 `grid_map.ground_grid_file`；Mode 1 目标高度改为**目标处地面 + body_height** |
+| `simulator/map_generator/src/map_publisher.cpp` | 新增 `ground_file` → 发布 `ground_surface`（**仅显示，绝不喂给 SCAN**）；高度窗口未删点时降为 INFO |
+| `launch/sentry_sim.launch.py`、`launch/sentry_sim.rviz` | 新增 `ground_file`/`ground_grid_file` 参数；RViz 增加"Terrain surface (colour = height)"显示 |
+| `scripts/make_terrain_maps.py`（新） | 生成 10°/20°/30° 合成坡道 + 解析式地面网格（角度给定，可定量） |
+| `scripts/make_terrain_route.py`（新） | 从地面网格生成 Mode 2/3 路线，含沿线净空检查 |
+| `scripts/check_terrain.py`（新） | 高度跟随判据：上升量、与地形偏差、反向下降，失败返回非零 |
+
+验证：三个合成坡道的上升量与 `tan(角度)×3 m` 完全一致（0.529 / 1.092 / 1.732 m）；
+真实场地路线上升 0.140 m。**未做动力学、未做地形规划**，详见该文的局限一节。
+
 ## 改动清单（相对上游 `103bce4`）
 
 

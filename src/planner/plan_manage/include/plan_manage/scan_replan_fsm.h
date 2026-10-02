@@ -2,6 +2,7 @@
 #define _SCAN_REPLAN_FSM_H_
 
 #include <Eigen/Eigen>
+#include <plan_manage/ground_height_map.h>
 #include <algorithm>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <iostream>
@@ -58,6 +59,10 @@ namespace scan_planner
     double planning_horizon_;
     double emergency_time_;
     double rviz_goal_height_;
+    // 地形跟随：提供地面高度网格后，Mode 1 的目标高度取「目标处地面 + 机体高度」，
+    // 而不是初始位姿的 z（后者在有坡度的地面上会落在错误高度）。
+    scan_planner::GroundHeightMap ground_map_;
+    bool terrain_following_{false};
     double self_inflation_z_up_, self_inflation_z_down_;
     double self_double_cylinder_radius_, self_double_cylinder_offset_;
     // 与 GridMap 碰撞包络一致的安全余量，使 RViz 显示与碰撞检查同一语义。

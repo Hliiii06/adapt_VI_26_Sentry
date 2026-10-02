@@ -95,6 +95,12 @@ def _setup(context):
             "use_sim_time=true 需要 /clock 来源；本仿真使用系统时钟，请保持 false")
 
     start_rviz = _as_bool(LaunchConfiguration("start_rviz").perform(context))
+    ground_grid_file = os.path.expanduser(LaunchConfiguration("ground_grid_file").perform(context))
+    ground_file = os.path.expanduser(LaunchConfiguration("ground_file").perform(context))
+    if ground_grid_file and not os.path.isfile(ground_grid_file):
+        raise RuntimeError("ground_grid_file 不存在: %s" % ground_grid_file)
+    if ground_file and not os.path.isfile(ground_file):
+        raise RuntimeError("ground_file 不存在: %s" % ground_file)
     yaw_mode = LaunchConfiguration("yaw_mode").perform(context)
     if yaw_mode not in ("hold", "align", "spin"):
         raise RuntimeError("yaw_mode must be 'hold', 'align' or 'spin'")
@@ -112,6 +118,7 @@ def _setup(context):
         "keep_z_min": float(LaunchConfiguration("keep_z_min").perform(context)),
         "keep_z_max": float(LaunchConfiguration("keep_z_max").perform(context)),
         "publish_raw_cloud": _as_bool(LaunchConfiguration("publish_raw_cloud").perform(context)),
+        "ground_file": ground_file,
     }
 
     # 1) 全局 PCD 地图发布（含演示用高度过滤与对照云）
@@ -147,6 +154,7 @@ def _setup(context):
         # 渲染出的点云已是 world 系，且外参已在渲染端应用，这里不能再叠一次。
         "grid_map.cloud_is_world": True,
         "grid_map.need_extrinsic": False,
+        "grid_map.ground_grid_file": ground_grid_file,
     }
     nodes.append(
         Node(
@@ -186,7 +194,8 @@ def _setup(context):
             output="screen",
             parameters=[controllers_yaml, common,
                         {"init_x": init_x, "init_y": init_y, "init_z": init_z,
-                         "init_yaw": init_yaw, "publish_tf": False}],
+                         "init_yaw": init_yaw, "publish_tf": False,
+                         "ground_grid_file": ground_grid_file}],
         )
     )
 
@@ -239,6 +248,13 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "keep_z_max", default_value="1.5",
                 description="演示地图：删除该高度以上的点"),
+            DeclareLaunchArgument(
+                "ground_grid_file", default_value="",
+                description="地面高度网格（prepare_terrain_map.py / make_terrain_maps.py 产出）。"
+                            "给出后运动模拟器与 Mode 1 目标高度都跟随地形；留空则 z 固定"),
+            DeclareLaunchArgument(
+                "ground_file", default_value="",
+                description="地形表面点云，仅用于 RViz 显示地形起伏"),
             DeclareLaunchArgument(
                 "publish_raw_cloud", default_value="true",
                 description="额外发布未过滤的对照云 /sentry_sim/global_cloud_raw"),

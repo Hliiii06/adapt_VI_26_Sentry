@@ -10,7 +10,7 @@
 - 本目录自 2026-10-01 起是**私有 Git 仓库**：`git@github.com:Hliiii06/adapt_VI_26_Sentry.git`，主分支 `main`。入库内容是文档、`scripts/`、`AGENTS.md`、`README.md`、`build.md` 与 `src/`（纳入本仓库的 SCAN 源码）；`artifacts/`、`log/`、`build/`、`install/` 由 `.gitignore` 排除，编译产物不入库，也不要用 `git add -f` 绕过。
 - 参考仓库（`../VI_26_Sentry`、`../../SCAN-Planner-Ros2`、`../../SCAN-Planner`）各有自己的远端，不要在本仓库提交或推送它们的源码与改动；本仓库正常提交/推送无需再逐次征求许可，但**推送前**确认没有密钥、串口配置等敏感文件被新增进跟踪范围。
 - **`src/` 是实施副本，不是参考仓库**：来源为 SCAN-Planner-Ros2 main `103bce4`，改动边界见 [实施报告](docs/migration/implementation_report.md)。不要再把 `../../SCAN-Planner-Ros2` 当作待改代码；它保持只读。RM 的 `../VI_26_Sentry` 始终只读。
-- 当前阶段：**S0–S3 已实施，Codex 第一轮审查发现的 4 项缺陷已修正（取消后复活、过期轨迹、测试误杀进程、测试误判通过），并补了受控碰撞场景；等待 Codex 复审**，尚未接入 VI_26_Sentry 实车。RViz 图形交互在本环境无法验证。实施入口见 [实施报告](docs/migration/implementation_report.md)，测试证据见 [S3 结果](docs/testing/s3_results.md)。
+- 当前阶段：**S0–S3 已实施，另完成地形分离与高度跟随（RViz 可见坡度）；Codex 第一轮审查发现的 4 项缺陷已修正（取消后复活、过期轨迹、测试误杀进程、测试误判通过），并补了受控碰撞场景；等待 Codex 复审**，尚未接入 VI_26_Sentry 实车。RViz 图形交互在本环境无法验证。实施入口见 [实施报告](docs/migration/implementation_report.md)，测试证据见 [S3 结果](docs/testing/s3_results.md)，地形见 [地形与高度跟随](docs/testing/terrain_following.md)。
 
 用户最新确认：三维导航指 SCAN 当前的三维占据/空间避障与参考高度实现，不要求自由三维或完整地形通行规划；现有 RM 配置已由用户验证 RViz 2D goal 规划并驱动实车；小陀螺部分由电控负责，仓库相关源码不代表实际执行路径。C 方向已认可，实施结果见 [实施报告](docs/migration/implementation_report.md)。
 
@@ -55,6 +55,9 @@ git log --oneline -5
 scripts/build.sh                       # 隔离构建（产物在 build/install，日志在 log/ros）
 scripts/run_sentry_sim.sh navi_mode:=1 # 启动闭环仿真
 scripts/scenario.sh mode1_lateral      # 场景验证，结果在 log/scenarios/
+scripts/scenario.sh terrain_ramp20     # 合成 20° 坡的高度跟随
+scripts/prepare_terrain_map.py --input ~/pcd_map/rmuc2026_field.pcd \
+  --out-prefix docs/testing/maps/field/rmuc2026   # 真实场地地形分离
 
 # 参考仓库（只读）
 git -C ../VI_26_Sentry status --short --branch

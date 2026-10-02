@@ -24,6 +24,9 @@ S0–S3 已在 `src/` 内实施，Codex 第一轮审查发现的 4 项缺陷已�
   以及第二轮对 Codex 审查意见的处理。
 - [S3 结果](testing/s3_results.md)：受控碰撞场景矩阵、三模式与失效停止实测数据、
   独立净空检查、上一轮缺陷与修正、未验证项。
+- [地形与高度跟随](testing/terrain_following.md)：地面分离方法、高度跟随、
+  合成坡道与真实场地的实测、局限、RViz 查看命令。**注意：该文更正了 S3 里
+  "x=−6 走廊净空 1.187 m"的旧结论（那是删点造成的假象）。**
 - [原始证据](testing/evidence/)：场景报告、`cmd_vel` 记录、日志摘要。
 - [合成测试地图](testing/maps/)：几何尺寸明确的受控地图与 `INDEX.txt`。
 - [实施计划](migration/plan.md)、[harness 交接说明](migration/implementation_handoff.md)：阶段划分与交付边界。
