@@ -83,3 +83,43 @@ RM `hnurm_interfaces/msg/decision/` 提供 Area、SpecialArea、Path、AllPaths�
 `hnurm_interfaces/new_msg/{NavToVision,VisionToNav,TargetType,TargetState}.msg` 是新增草稿；当前 CMake 只匹配 msg/*/*.msg，未生成这些类型，未发现已接入导航/串口的证据。C 首期不依赖它们。
 
 SCAN2 自定义消息独立在 `planner/scan_planner_msgs/msg/`。ROS1 的消息原在 scan_planner 包，不能直接跨 ROS 版本复用类型。初次适配应保留各自消息，通过明确转换连接。
+
+## 本适配新增的话题（全向哨兵）
+
+以下话题都在 `/sentry_sim` 命名空间内，是仿真适配层的一部分，**不属于 RM 原有接口**。
+
+| topic | type | publisher | subscriber | QoS | frame | 时间戳来源 | 频率 |
+|---|---|---|---|---|---|---|---|
+| `planning/reset` | `std_msgs/msg/Bool` | 测试记录器 / 操作者 | `scan_replan_fsm`、`closed_loop_controller` | reliable、volatile | 无 | — | 事件触发 |
+| `planning/task_active` | `scan_planner_msgs/msg/TaskAuthorization` | `scan_replan_fsm` | `closed_loop_controller` | **reliable + transient_local**，depth 1 | `world`（仅填 header，不用于变换） | `node->now()`（系统时钟，`use_sim_time=false`） | 事件触发（接受新任务 / 取消） |
+| `ground_surface` | `sensor_msgs/msg/PointCloud2` | `map_pub` | RViz | reliable + transient_local | `world` | 发布时 `now()` | 与 `publish_rate` 同 |
+| `terrain_surface_mesh` | `visualization_msgs/msg/Marker`（TRIANGLE_LIST） | `map_pub` | RViz | reliable + transient_local | `world` | 发布时 `now()` | 与 `publish_rate` 同 |
+| `body_marker` | `visualization_msgs/msg/Marker`（CYLINDER） | `go2_kinematic_sim` | RViz | reliable + transient_local | `world` | 仿真步时间 | 与仿真步同 |
+
+### `scan_planner_msgs/msg/TaskAuthorization`
+
+```
+std_msgs/Header header
+bool active
+uint32 task_id
+```
+
+**为什么不是 `std_msgs/msg/Bool`**：取消时执行端会**立即本地锁止**（不等规划端），
+但可能有一条**在取消之前发布、延迟到达**的授权消息。只有 bool 无法区分它与新任务的授权，
+会把已锁止的执行端重新放行。`task_id` 由规划端每接受一个新任务自增，
+执行端只接受 `task_id > 已撤销到的编号` 的授权。
+
+**语义**：
+- `active=true`：规划端接受了一个新任务，允许执行。
+- `active=false`：撤销授权，执行端应立即停车并遗忘轨迹。
+- `task_id`：单调自增；撤销消息携带当前编号，执行端据此记录"已撤销到哪一号"。
+
+**验证**：`scripts/scenario.sh cancel_race` 注入 `task_id=1` 的延迟授权，
+日志出现 `Ignoring stale task authorization task_id=1 (revoked up to 3)`。
+
+### 高度相关话题的边界（重要）
+
+`ground_surface` / `terrain_surface_mesh` / `body_marker` **仅用于 RViz 显示**。
+地面点**绝不能**进入 SCAN 的占据栅格（否则地板本身即障碍）；
+地形高度通过地面高度**网格文件**（`ground_grid_file`）提供给运动模拟器与规划器，
+不通过话题。详见 [地形与高度跟随](../testing/terrain_following.md)。
