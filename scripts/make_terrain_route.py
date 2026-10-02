@@ -82,7 +82,7 @@ class Ground:
         return a * (1 - ty) + b * ty
 
 
-def load_obstacles_xy(path, z_min, z_max):
+def load_obstacles_xyz(path):
     import array
     with open(path, "rb") as handle:
         while True:
@@ -102,15 +102,20 @@ def load_obstacles_xy(path, z_min, z_max):
     values.frombytes(raw[: (len(raw) // 12) * 12])
     pts = []
     for i in range(0, len(values), 3):
-        z = values[i + 2]
-        if z_min <= z <= z_max:
-            pts.append((values[i], values[i + 1]))
+        pts.append((values[i], values[i + 1], values[i + 2]))
     return pts
 
 
-def min_clearance(points, x, y, search=1.5):
+def min_clearance(points, x, y, z_lo, z_hi, search=1.5):
+    """只统计落在**机体高度带** [z_lo, z_hi] 内的障碍点。
+
+    固定用绝对 z 区间是错的：洞顶在机器人头顶之上时并不构成碰撞，
+    按绝对高度统计会把洞顶当成"净空 0"。高度带应由地面网格推导。
+    """
     best = search
-    for px, py in points:
+    for px, py, pz in points:
+        if pz < z_lo or pz > z_hi:
+            continue
         d = math.hypot(px - x, py - y)
         if d < best:
             best = d
@@ -129,8 +134,8 @@ def main():
     parser.add_argument("--obstacles", default="",
                         help="可选：障碍 PCD，用于沿线净空检查并报警")
     parser.add_argument("--radius", type=float, default=0.26)
-    parser.add_argument("--z-band", type=float, nargs=2, default=(0.0, 1.0),
-                        metavar=("ZMIN", "ZMAX"))
+    parser.add_argument("--z-inflation", type=float, default=0.125,
+                        help="机体高度带相对轨迹 z 的上下容差（与 SCAN 的 z 膨胀一致）")
     parser.add_argument("--name", default="terrain route")
     args = parser.parse_args()
 
@@ -159,14 +164,18 @@ def main():
         zs[0], zs[-1]))
 
     if args.obstacles:
-        obs = load_obstacles_xy(args.obstacles, args.z_band[0], args.z_band[1])
+        obs = load_obstacles_xyz(args.obstacles)
         worst = None
-        for (x, y, _, _) in pts:
-            c = min_clearance(obs, x, y)
+        for (x, y, z, _) in pts:
+            # 机体高度带由**地面网格 + 机体中心高度**推导，与 SCAN 的 z 膨胀一致
+            z_center = ground.at(x, y) + args.body_height
+            c = min_clearance(obs, x, y, z_center - args.z_inflation,
+                              z_center + args.z_inflation)
             if worst is None or c < worst[0]:
                 worst = (c, x, y)
-        print("沿线最小净空: %.3f m（要求 >= %.2f），出现在 (%.2f, %.2f)"
-              % (worst[0], args.radius, worst[1], worst[2]))
+        print("沿线最小净空: %.3f m（要求 >= %.2f，按机体高度带 z=地面+%.3f±%.3f），"
+              "出现在 (%.2f, %.2f)"
+              % (worst[0], args.radius, args.body_height, args.z_inflation, worst[1], worst[2]))
         if worst[0] < args.radius:
             print("警告：该路线会撞进障碍，请换起点/终点或改用避障规划")
 

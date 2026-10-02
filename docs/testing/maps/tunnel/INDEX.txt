@@ -1,0 +1,6 @@
+# 可控洞口场景（解析给定，示例尺寸，非实车标定）
+# 走廊半宽 0.80 m，洞半宽 0.45 m，洞 y∈[2.20, 2.80]
+# 坡 20°，平台 z=0.546 m；机器人半径 0.26 m、高 0.25 m，包络 z±0.125
+name	roof_height	clear_height	points	expect
+tunnel_high	0.45	0.996	-	pass
+tunnel_low	0.20	0.746	-	refuse

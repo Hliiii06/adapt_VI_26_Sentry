@@ -22,6 +22,8 @@
 #   terrain_ramp10/20/30  合成 10/20/30° 上坡
 #   terrain_down     同一 20° 坡反向（下坡）
 #   terrain_crest    上坡->平台->下坡（跨越坡顶）
+#   terrain_tunnel_high  可控洞口：高洞应通过
+#   terrain_tunnel_low   可控洞口：低洞应拒绝
 #   terrain_field    真实场地 + 地形分离，Mode 3，z 跟随真实地面（起伏约 0.14 m）
 #   terrain_field_mode1  同上但走 Mode 1（RViz 2D Goal Pose 链路）
 #   terrain_tunnel   穿中央洞口的 Mode 3 路线（当前失败，原因见 docs/testing/tunnel_diagnosis.md）
@@ -101,6 +103,29 @@ case "${SCENARIO}" in
                                  keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
                                  ground_file:=${MAPS}/field/rmuc2026_surface.pcd
                                  ground_grid_file:=${MAPS}/field/rmuc2026_ground.txt) ;;
+  # 可控洞口：高洞（洞顶离平台 0.45 m）应当通过
+  terrain_tunnel_high)
+                   T=tunnel_high
+                   MODE=3; EXTRA=(reference_path_file:=${MAPS}/tunnel/tunnel_mode3.yaml)
+                   DUR=55; CHECK=terrain; SEND_GOAL=false
+                   TERRAIN_EXPECT=crest; GOAL_X=0.0; GOAL_Y=7.0; TOL=0.60
+                   MIN_RISE=0.45; MIN_DROP=0.45
+                   GROUND_GRID="${MAPS}/tunnel/${T}_ground.txt"
+                   INIT_X=0.0; INIT_Y=-2.0
+                   SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/tunnel/${T}.pcd map_offset_z:=0.0
+                                 keep_z_min:=-1.0 keep_z_max:=2.5 publish_raw_cloud:=false
+                                 ground_file:=${MAPS}/tunnel/${T}_ground.pcd
+                                 ground_grid_file:=${MAPS}/tunnel/${T}_ground.txt) ;;
+  # 可控洞口：低洞（洞顶离平台 0.20 m，侵入机体高度带）必须拒绝并停在洞前
+  terrain_tunnel_low)
+                   T=tunnel_low
+                   MODE=3; EXTRA=(reference_path_file:=${MAPS}/tunnel/tunnel_low_mode3.yaml)
+                   DUR=45; CHECK=passage; SEND_GOAL=false; GATE_Y=2.20; EXPECT=refuse
+                   INIT_X=0.0; INIT_Y=-2.0
+                   SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/tunnel/${T}.pcd map_offset_z:=0.0
+                                 keep_z_min:=-1.0 keep_z_max:=2.5 publish_raw_cloud:=false
+                                 ground_file:=${MAPS}/tunnel/${T}_ground.pcd
+                                 ground_grid_file:=${MAPS}/tunnel/${T}_ground.txt) ;;
   # 下坡：同一条 20° 坡，路线反向
   terrain_down)    TMAP=ramp_20deg
                    MODE=3; EXTRA=(reference_path_file:=${MAPS}/terrain/${TMAP}_down_mode3.yaml)

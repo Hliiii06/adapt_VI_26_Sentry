@@ -1,0 +1,10 @@
+roof_height=0.200
+clear_height=0.746
+plateau_z=0.546
+tunnel_y0=2.200
+tunnel_y1=2.800
+tunnel_half_width=0.450
+low_box=0.55 0.75 -1.60 -1.20 0.12
+expect=refuse
+robot_z_band=0.25
+z_inflation=0.125
