@@ -3,7 +3,10 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
@@ -12,6 +15,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 
 class MapPublisher : public rclcpp::Node
 {
@@ -128,6 +132,107 @@ public:
                   "visualisation only, NOT fed to the planner",
                   ground_cloud.size());
     }
+    // 地形实体网格（按高度着色），用于在 RViz 里看清坡道与洞口
+    const std::string mesh_grid =
+        declare_parameter<std::string>("ground_mesh_grid_file", "");
+    if (!mesh_grid.empty())
+    {
+      std::ifstream grid_file(mesh_grid);
+      if (!grid_file.is_open())
+        throw std::runtime_error("failed to load ground mesh grid: " + mesh_grid);
+      std::string line;
+      double cell = 0.0, gx0 = 0.0, gy0 = 0.0;
+      int gnx = 0, gny = 0;
+      bool header_done = false;
+      std::vector<double> heights;
+      while (std::getline(grid_file, line))
+      {
+        if (line.empty()) continue;
+        if (line[0] == '#')
+        {
+          if (!header_done && line.find("cell") != std::string::npos)
+          {
+            std::istringstream stream(line);
+            std::string token;
+            while (stream >> token)
+            {
+              if (token == "cell") stream >> cell;
+              else if (token == "x0") stream >> gx0;
+              else if (token == "y0") stream >> gy0;
+              else if (token == "nx") stream >> gnx;
+              else if (token == "ny") stream >> gny;
+            }
+            header_done = (gnx > 1 && gny > 1 && cell > 0.0);
+          }
+          continue;
+        }
+        std::istringstream stream(line);
+        double value = 0.0;
+        while (stream >> value) heights.push_back(value);
+      }
+      if (!header_done || heights.size() != static_cast<size_t>(gnx) * static_cast<size_t>(gny))
+        throw std::runtime_error("ground mesh grid malformed: " + mesh_grid);
+
+      ground_mesh_.header.frame_id = frame_id_;
+      ground_mesh_.ns = "terrain_surface";
+      ground_mesh_.id = 0;
+      ground_mesh_.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
+      ground_mesh_.action = visualization_msgs::msg::Marker::ADD;
+      ground_mesh_.pose.orientation.w = 1.0;
+      ground_mesh_.scale.x = 1.0;
+      ground_mesh_.scale.y = 1.0;
+      ground_mesh_.scale.z = 1.0;
+      ground_mesh_.color.a = 1.0;
+
+      double hmin = heights.front(), hmax = heights.front();
+      for (double h : heights) { hmin = std::min(hmin, h); hmax = std::max(hmax, h); }
+      const double span = std::max(1e-6, hmax - hmin);
+      const auto shade = [&](double h) {
+        const double t = (h - hmin) / span;
+        // 蓝(低) -> 青 -> 绿 -> 黄 -> 红(高)
+        geometry_msgs::msg::Point c;
+        c.x = std::min(1.0, std::max(0.0, 1.5 - std::abs(4.0 * t - 3.0)));
+        c.y = std::min(1.0, std::max(0.0, 1.5 - std::abs(4.0 * t - 2.0)));
+        c.z = std::min(1.0, std::max(0.0, 1.5 - std::abs(4.0 * t - 1.0)));
+        return c;
+      };
+      const auto vertex = [&](int i, int j) {
+        geometry_msgs::msg::Point p;
+        p.x = gx0 + i * cell;
+        p.y = gy0 + j * cell;
+        p.z = heights[static_cast<size_t>(j) * gnx + i];
+        return p;
+      };
+      for (int j = 0; j + 1 < gny; ++j)
+      {
+        for (int i = 0; i + 1 < gnx; ++i)
+        {
+          const geometry_msgs::msg::Point p00 = vertex(i, j);
+          const geometry_msgs::msg::Point p10 = vertex(i + 1, j);
+          const geometry_msgs::msg::Point p01 = vertex(i, j + 1);
+          const geometry_msgs::msg::Point p11 = vertex(i + 1, j + 1);
+          const geometry_msgs::msg::Point tri[6] = {p00, p10, p11, p00, p11, p01};
+          for (const auto &p : tri)
+          {
+            ground_mesh_.points.push_back(p);
+            const auto c = shade(p.z);
+            std_msgs::msg::ColorRGBA col;
+            col.r = static_cast<float>(c.x);
+            col.g = static_cast<float>(c.y);
+            col.b = static_cast<float>(c.z);
+            col.a = 1.0f;
+            ground_mesh_.colors.push_back(col);
+          }
+        }
+      }
+      ground_mesh_publisher_ = create_publisher<visualization_msgs::msg::Marker>(
+          "terrain_surface_mesh", rclcpp::QoS(1).reliable().transient_local());
+      RCLCPP_INFO(get_logger(),
+                  "Publishing terrain surface mesh on terrain_surface_mesh "
+                  "(%zu triangles, z %.3f..%.3f m) — visualisation only",
+                  ground_mesh_.points.size() / 3, hmin, hmax);
+    }
+
     timer_ = create_wall_timer(
         std::chrono::duration<double>(1.0 / std::max(0.1, publish_rate)),
         std::bind(&MapPublisher::publishMap, this));
@@ -145,6 +250,11 @@ private:
       raw_message_.header.stamp = message_.header.stamp;
       raw_publisher_->publish(raw_message_);
     }
+    if (ground_mesh_publisher_)
+    {
+      ground_mesh_.header.stamp = message_.header.stamp;
+      ground_mesh_publisher_->publish(ground_mesh_);
+    }
     if (ground_publisher_)
     {
       ground_message_.header.stamp = message_.header.stamp;
@@ -159,6 +269,9 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr publisher_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr raw_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr ground_publisher_;
+  // 地形实体网格：坡道/洞口看"面"比看"点云"直观得多。仅用于显示，不进规划。
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr ground_mesh_publisher_;
+  visualization_msgs::msg::Marker ground_mesh_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

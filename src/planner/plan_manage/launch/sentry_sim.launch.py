@@ -97,6 +97,7 @@ def _setup(context):
     start_rviz = _as_bool(LaunchConfiguration("start_rviz").perform(context))
     ground_grid_file = os.path.expanduser(LaunchConfiguration("ground_grid_file").perform(context))
     ground_file = os.path.expanduser(LaunchConfiguration("ground_file").perform(context))
+    robot_radius = float(LaunchConfiguration("robot_radius").perform(context))
     if ground_grid_file and not os.path.isfile(ground_grid_file):
         raise RuntimeError("ground_grid_file 不存在: %s" % ground_grid_file)
     if ground_file and not os.path.isfile(ground_file):
@@ -119,6 +120,8 @@ def _setup(context):
         "keep_z_max": float(LaunchConfiguration("keep_z_max").perform(context)),
         "publish_raw_cloud": _as_bool(LaunchConfiguration("publish_raw_cloud").perform(context)),
         "ground_file": ground_file,
+        # 地形实体网格（按高度着色的三角面），用于在 RViz 里看清坡道与洞口
+        "ground_mesh_grid_file": ground_grid_file,
     }
 
     # 1) 全局 PCD 地图发布（含演示用高度过滤与对照云）
@@ -195,7 +198,9 @@ def _setup(context):
             parameters=[controllers_yaml, common,
                         {"init_x": init_x, "init_y": init_y, "init_z": init_z,
                          "init_yaw": init_yaw, "publish_tf": False,
-                         "ground_grid_file": ground_grid_file}],
+                         "ground_grid_file": ground_grid_file,
+                         # 实体机体标记的尺寸与碰撞包络同源
+                         "robot_radius": robot_radius}],
         )
     )
 
@@ -255,6 +260,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ground_file", default_value="",
                 description="地形表面点云，仅用于 RViz 显示地形起伏"),
+            DeclareLaunchArgument(
+                "robot_radius", default_value="0.26",
+                description="机器人外接半径（米），用于实体机体标记；与碰撞包络同源"),
             DeclareLaunchArgument(
                 "publish_raw_cloud", default_value="true",
                 description="额外发布未过滤的对照云 /sentry_sim/global_cloud_raw"),

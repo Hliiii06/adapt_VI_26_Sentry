@@ -7,6 +7,8 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/transform_broadcaster.h>
@@ -38,6 +40,7 @@ public:
     // 地面机器人不控制 z（z 是地形的结果），所以这里由地形推导，而不是抄轨迹的 z。
     const std::string ground_file = declare_parameter<std::string>("ground_grid_file", "");
     body_height_ = declare_parameter<double>("body_height", 0.125);
+    robot_radius_ = declare_parameter<double>("robot_radius", 0.26);
     if (!ground_file.empty())
     {
       if (!ground_map_.load(ground_file))
@@ -53,6 +56,23 @@ public:
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("body_pose", 100);
+    // 实体机体：RViz 里看"车体贴着地形升降"比看圆柱包络直观。
+    // 尺寸来自机器人参数（半径/高度），与碰撞包络同源。
+    body_marker_pub_ = create_publisher<visualization_msgs::msg::Marker>(
+        "body_marker", rclcpp::QoS(1).reliable().transient_local());
+    body_marker_.header.frame_id = "world";
+    body_marker_.ns = "robot_body";
+    body_marker_.id = 0;
+    body_marker_.type = visualization_msgs::msg::Marker::CUBE;
+    body_marker_.action = visualization_msgs::msg::Marker::ADD;
+    // 机体是 0.25 m 高的方块：CUBE 的 scale.z 用**全高**，位置放在机体中心
+    body_marker_.scale.x = 2.0 * robot_radius_;
+    body_marker_.scale.y = 2.0 * robot_radius_;
+    body_marker_.scale.z = 2.0 * body_height_;
+    body_marker_.color.r = 0.25f;
+    body_marker_.color.g = 0.65f;
+    body_marker_.color.b = 1.0f;
+    body_marker_.color.a = 0.85f;
     cmd_sub_ = create_subscription<geometry_msgs::msg::Twist>(
         "cmd_vel", 20, std::bind(&Go2KinematicSim::cmdCallback, this, std::placeholders::_1));
     last_cmd_time_ = now();
@@ -84,6 +104,18 @@ private:
     vy_cmd_ = std::clamp(msg->linear.y, -max_vy_, max_vy_);
     vyaw_cmd_ = std::clamp(msg->angular.z, -max_vyaw_, max_vyaw_);
     last_cmd_time_ = now();
+  }
+
+  void publishBodyMarker(const rclcpp::Time &stamp)
+  {
+    body_marker_.header.stamp = stamp;
+    body_marker_.pose.position.x = x_;
+    body_marker_.pose.position.y = y_;
+    body_marker_.pose.position.z = z_;
+    tf2::Quaternion q;
+    q.setRPY(0.0, 0.0, yaw_);
+    body_marker_.pose.orientation = tf2::toMsg(q);
+    body_marker_pub_->publish(body_marker_);
   }
 
   void publishOdom(const rclcpp::Time &stamp)
@@ -187,6 +219,7 @@ private:
     }
     yaw_ = normalizeAngle(yaw_ + wz_applied_ * dt);
     publishOdom(current_time);
+    publishBodyMarker(current_time);
   }
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
@@ -202,6 +235,9 @@ private:
   bool publish_tf_{false};
   bool terrain_following_{false};
   double body_height_{0.125};
+  double robot_radius_{0.26};
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr body_marker_pub_;
+  visualization_msgs::msg::Marker body_marker_;
   GroundHeightMap ground_map_;
   std::string frame_id_, child_frame_id_;
   rclcpp::Time last_cmd_time_{0, 0, RCL_ROS_TIME};

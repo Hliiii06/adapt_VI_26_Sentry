@@ -11,10 +11,11 @@ find_package(PCL REQUIRED COMPONENTS common io filters)
 find_package(pcl_conversions REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 add_executable(map_pub src/map_publisher.cpp)
 target_include_directories(map_pub PRIVATE ${PCL_INCLUDE_DIRS})
-ament_target_dependencies(map_pub pcl_conversions rclcpp sensor_msgs)
+ament_target_dependencies(map_pub pcl_conversions rclcpp sensor_msgs visualization_msgs)
 target_link_libraries(map_pub Eigen3::Eigen ${PCL_LIBRARIES})
 install(TARGETS map_pub DESTINATION lib/${PROJECT_NAME})
 
