@@ -34,7 +34,7 @@ S0–S3 已在 `src/` 内实施，Codex 第一轮审查发现的 4 项缺陷已�
 - [合成测试地图](testing/maps/)：几何尺寸明确的受控地图与 `INDEX.txt`。
 - [实施计划](migration/plan.md)、[harness 交接说明](migration/implementation_handoff.md)：阶段划分与交付边界。
 
-仓库入口与构建/启动命令见根 [README.md](../../README.md)。
+仓库入口与构建/启动命令见根 [README.md](../README.md)。
 
 ## 15 分钟阅读顺序
 
