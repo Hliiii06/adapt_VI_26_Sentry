@@ -1,0 +1,13 @@
+# 由 scripts/make_terrain_route.py 从地面网格生成，请勿手改 z
+# 地面高度沿路径变化 0.080 m
+/sentry_sim/reference_path_publisher:
+  ros__parameters:
+    frame_id: world
+    publish_delay_sec: 0.5
+    waypoints:
+      [
+       2.000, -7.600, -0.034, 2.000, -7.100, -0.020,
+       2.000, -6.600, -0.014, 2.000, -6.100, 0.006,
+       2.000, -5.600, 0.020, 2.000, -5.100, 0.026,
+       2.000, -4.600, 0.046,
+      ]

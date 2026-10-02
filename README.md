@@ -15,10 +15,12 @@ ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 迁移的调研、实施与
 | S3 | 三模式与失效场景验证 | 完成（第二轮修正后），见 [测试结果](docs/testing/s3_results.md) |
 | T | 地形分离与高度跟随（RViz 可见坡度） | 完成，见 [地形与高度跟随](docs/testing/terrain_following.md) |
 | — | Codex 第一轮审查 | 已完成，发现 4 项缺陷，已修正 |
-| — | Codex 复审 | **待进行** |
+| — | Codex 复审 | 已完成，5 项基础缺陷 + 遗留项已修正；见 [地形核对](docs/testing/field_terrain_check.md) |
+| T2 | 受控洞口场景（高洞过 / 低洞拒） | 完成，见 [真实场地地形核对](docs/testing/field_terrain_check.md) |
+| T3 | RViz 实体显示（地形网格 + 实体机体） | 已实现，**观感待用户验收** |
 | I1–I4 | 接入 VI_26_Sentry 实车 | 未开始，另获授权后进行 |
 
-**尚未接实车，也尚未通过复审。** 本仓库所有输出都在 `/sentry_sim` 命名空间内，不存在通往 UART / 底盘
+**尚未接实车。** 本仓库所有输出都在 `/sentry_sim` 命名空间内，不存在通往 UART / 底盘
 的路径；仿真中的加速度、地面过滤阈值等参数是仿真取值，不是实车标定结果。
 
 RViz 图形交互在本环境**无法验证**（创建不了 OpenGL 上下文），当前状态是
