@@ -63,6 +63,9 @@ scripts/scenario.sh terrain_tunnel_low  # 可控洞口：低洞应拒绝
 scripts/scenario.sh terrain_lateral    # 横向坡面绕障：规划高度 vs 执行高度
 scripts/scenario.sh cancel_race        # 规划期间取消 + 注入延迟旧授权/新时间戳轨迹
 scripts/scenario.sh goal_out_of_grid   # 目标在已知地面之外：拒绝规划且不动
+
+# 参考仓库（只读）注意路径：它们在 /home/hzq 下，不在本仓库的父目录 nav/ 下
+grep -n obstacles_inflation /home/hzq/SCAN-Planner/src/planner/plan_manage/launch/advanced_param.xml
 scripts/prepare_terrain_map.py --input ~/pcd_map/rmuc2026_field.pcd \
   --out-prefix docs/testing/maps/field/rmuc2026   # 真实场地地形分离
 
