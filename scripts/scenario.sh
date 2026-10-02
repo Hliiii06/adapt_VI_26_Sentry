@@ -20,7 +20,8 @@
 #   low_obstacle      合成地图 0.15 m 矮障碍，不删点（预期拦停）
 #   low_obstacle_cut  同一地图套用演示删点（预期被穿过 = 复现已知缺陷）
 #   terrain_ramp10/20/30  合成 10/20/30° 坡，验证 z 跟随地形
-#   terrain_field    真实场地 + 地形分离，z 跟随真实地面（起伏约 0.14 m）
+#   terrain_field    真实场地 + 地形分离，Mode 3，z 跟随真实地面（起伏约 0.14 m）
+#   terrain_field_mode1  同上但走 Mode 1（RViz 2D Goal Pose 链路）
 set -eo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -71,6 +72,15 @@ case "${SCENARIO}" in
   terrain_field)   MODE=3; EXTRA=(reference_path_file:=${MAPS}/field/field_slope_mode3.yaml)
                    DUR=45; CHECK=terrain; SEND_GOAL=false
                    INIT_X=-11.75; INIT_Y=-7.50; GROUND_GRID="${MAPS}/field/rmuc2026_ground.txt"
+                   SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/field/rmuc2026_obstacles.pcd map_offset_z:=0.0
+                                 keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
+                                 ground_file:=${MAPS}/field/rmuc2026_surface.pcd
+                                 ground_grid_file:=${MAPS}/field/rmuc2026_ground.txt) ;;
+  # 真实场地 + 地形，Mode 1（RViz 2D Goal Pose 走的就是这条链路）
+  terrain_field_mode1) MODE=1; EXTRA=(yaw_mode:=hold); DUR=40
+                   GOAL_X=-11.0; GOAL_Y=-2.0; CHECK=goal
+                   INIT_X=-11.50; INIT_Y=-7.00
+                   GROUND_GRID="${MAPS}/field/rmuc2026_ground.txt"
                    SYN_MAP_ARGS=(pcd_map_file:=${MAPS}/field/rmuc2026_obstacles.pcd map_offset_z:=0.0
                                  keep_z_min:=-1.0 keep_z_max:=2.0 publish_raw_cloud:=false
                                  ground_file:=${MAPS}/field/rmuc2026_surface.pcd

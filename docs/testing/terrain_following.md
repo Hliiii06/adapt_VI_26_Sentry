@@ -139,9 +139,29 @@ RViz 里重点看：
 - **Sentry envelope + heading**：蓝色包络圆柱 + 橙色机头箭头，随地形一起升降；
 - **Occupancy / Inflated Occupancy**：SCAN 实际看到的占据与膨胀（**不含地面**，地面只走 surface 话题）。
 
+### Mode 1（RViz 2D Goal Pose）注意事项
+
+修正后的场地地图**障碍明显变多**（自由格约 18%，中央结构把场地分成左右两个大连通区，
+各约 39 m²）。而 SCAN 的 Mode 1 **不做全局路径搜索**：它从当前位姿直接生成到目标的多项式
+参考，由局部优化绕障。所以**目标必须近似视线可达**，点到障碍后面会 `A-star failed` 并停住
+（这是上游行为，不是本适配引入的）。
+
+实测可用的一组（已跑通，到目标 0.004 m）：
+
+| | 值 |
+|---|---|
+| 初始位姿 | `init_x:=-11.50 init_y:=-7.00`（该处地面 -0.027 m） |
+| 点击目标 | **(-11.00, -2.00)** |
+| 效果 | 机体 z 0.098 → 0.216 m（**+0.118 m**），朝向偏离 0.00° |
+
+同一区域内其它可选目标（高差 / 距离）：(-11.50, -2.00) +0.118/5.00、
+(-11.00, -2.50) +0.112/4.53、(-11.50, -2.50) +0.112/4.50。
+真实的坡只有约 1.4°，所以横移时高度变化是**缓变**的；要看明显的坡请用下面 20°/30° 的合成坡道。
+
 命令行复算（不需要 RViz）：
 
 ```bash
-scripts/scenario.sh terrain_ramp20     # 合成 20° 坡
-scripts/scenario.sh terrain_field      # 真实场地缓坡
+scripts/scenario.sh terrain_ramp20        # 合成 20° 坡
+scripts/scenario.sh terrain_field         # 真实场地缓坡（Mode 3）
+scripts/scenario.sh terrain_field_mode1   # 真实场地缓坡（Mode 1，RViz 目标链路）
 ```
