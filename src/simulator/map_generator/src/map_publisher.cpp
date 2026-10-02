@@ -182,7 +182,8 @@ public:
       ground_mesh_.scale.x = 1.0;
       ground_mesh_.scale.y = 1.0;
       ground_mesh_.scale.z = 1.0;
-      ground_mesh_.color.a = 1.0;
+      // 半透明：地形面是**辅助层**，不能盖住真正的 PCD 点云。
+      ground_mesh_.color.a = 0.45;
 
       double hmin = heights.front(), hmax = heights.front();
       for (double h : heights) { hmin = std::min(hmin, h); hmax = std::max(hmax, h); }
@@ -220,7 +221,7 @@ public:
             col.r = static_cast<float>(c.x);
             col.g = static_cast<float>(c.y);
             col.b = static_cast<float>(c.z);
-            col.a = 1.0f;
+            col.a = 0.45f;
             ground_mesh_.colors.push_back(col);
           }
         }

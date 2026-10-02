@@ -117,6 +117,24 @@
 **本文件的全局二次曲面地面无法表达斜坡，会把斜坡面误判成障碍**。
 后者是本实现的缺陷，待改为局部地面估计。**当前不要把洞口/斜坡场景当作可用。**
 
+### RViz 图层默认状态（此前的坑）
+
+上一轮把「原始对照云 / 演示地图 / 传感器云 / 占据 / 膨胀占据」全部默认关掉，
+同时新加的**地形实体网格是不透明的、覆盖整片场地**，结果用户只看到"一整块蓝色的地图"，
+PCD 点云看不见了。这是把 Codex 的"点云与包络作为可开关的调试层"误读成"默认关闭"。
+
+现在的默认状态：
+
+| 图层 | 默认 | 说明 |
+|---|---|---|
+| PCD map (obstacles / height-cut demo) | **开** | `/sentry_sim/global_cloud`，真正的 PCD 点云 |
+| Sensor Cloud | **开** | `/sentry_sim/cloud`，仿真雷达渲染云 |
+| Terrain surface (colour = height) | 开 | 地形高度网格点云（稀疏） |
+| Terrain surface (solid mesh) | **关** | 实心地形面；开启时半透明(alpha 0.45)，需要时手动勾 |
+| Robot body (solid) | 开 | 半径 0.26 的圆柱，与包络同形 |
+| Sentry envelope + heading | 开 | 调试层 |
+| Original map / Occupancy / Inflated | 关 | 调试层，按需开 |
+
 ## 八、在 RViz 里怎么看
 
 ```bash
