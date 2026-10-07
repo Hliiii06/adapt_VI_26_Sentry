@@ -181,6 +181,9 @@ public:
   inline int getOccupancy(Eigen::Vector3d pos);
   inline int getOccupancy(Eigen::Vector3i id);
   inline int getInflateOccupancy(Eigen::Vector3d pos, double yaw);
+  // 是否已经收到过点云输入。Mode 2 的自动起步用它避免"第一帧 odom 就规划"时地图还是空的
+  // （空图上局部轨迹的碰撞/可行性检查没有意义，实测会连续报 dynamic feasibility failed）。
+  inline bool hasCloudData() const { return md_.has_cloud_; }
 
   inline void boundIndex(Eigen::Vector3i& id);
   inline bool isUnknown(const Eigen::Vector3i& id);

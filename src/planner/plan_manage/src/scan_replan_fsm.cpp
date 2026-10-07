@@ -451,7 +451,12 @@ namespace scan_planner
 
     have_odom_ = true;
     publishSelfInflationMarker();
-    if (navi_mode_ == NAVI_MODE::PRESET_TARGET && !preset_started_)
+    // Mode 2 自动起步：必须等到**已经有云输入**。否则第一帧 odom 就会在地图为空的
+    // 情况下规划，局部轨迹的碰撞/可行性检查失去意义（影子接入实测：连续 dynamic
+    // feasibility failed 999 次、没有任何轨迹；仿真里因为渲染几乎同时到达而侥幸不触发）。
+    if (navi_mode_ == NAVI_MODE::PRESET_TARGET && !preset_started_
+        && planner_manager_ && planner_manager_->grid_map_
+        && planner_manager_->grid_map_->hasCloudData())
     {
       preset_started_ = true;
       planGlobalTrajbyGivenWps();

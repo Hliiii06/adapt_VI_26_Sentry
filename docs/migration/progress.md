@@ -26,6 +26,27 @@
   回放与影子验收。本轮 Codex 只交付计划，未实现任何 adapter，未授权硬件或底盘输出。
 - 参考仓库 RM main `7dfe71a`、SCAN2 main `103bce4` 状态未变；RM 两项未跟踪内容与 SCAN1 原有修改保留。
 
+## 2026-10-07：交接 B 的 B1/B2 实现完成，B3 影子验收（合成输入）
+
+用户批准开始任务二。**本轮实现了影子接入代码**，仍未接实车、仍未向底盘输出。
+
+- 新增 `src/sentry_scan_adapter`（薄适配包）与 `/sentry_scan` 影子入口：
+  `rm_input_adapter`（TF/odom/云/速度适配，时间/有限值/TF/定位跳变门控，失效发布 `planning/reset`）、
+  `shadow_guard`（只发 `cmd_vel_shadow`；周期检查 `/cmd_vel` 发布者；yaw/linear.z 恒零）、
+  `check_inputs`（输入健康与配对检查工具）。
+- SCAN 最小改动：GridMap 可选严格 sensor/cloud 配对（仿真默认不变）、跟踪器
+  `yaw_candidate_enabled`、可视化 frame 可配置（默认保持仿真硬编码）。
+- 契约：[影子输入契约](../interfaces/shadow_input_contract.md)；参数模板
+  `src/sentry_scan_adapter/config/shadow_contract.yaml`。
+- 验收：[影子验收证据](../testing/shadow_acceptance.md)。判据脚本 `scripts/check_shadow_graph.py`、
+  场景编排 `scripts/test_shadow_entry.sh`、合成输入 `scripts/fake_rm_inputs.py`、
+  数学单测 `scripts/test_shadow_adapter_math.py`；日志与影子 CSV 在 `log/shadow/`（不入库）。
+- **已验证**：启动隔离（无 UART/Nav2/模拟器、无 `/cmd_vel` 发布者）、三模式产生候选速度且 yaw 恒零、
+  云/odom/TF 中断与旧 stamp 重发/时间倒退/定位跳变均失效锁止、取消后不重新运动、
+  GridMap 严格配对拒绝、坐标/杆臂/yaw=90° 数值样例。
+- **未完成/未验证**：真实 RM 数据或录包回放（I2 真实影子验收）、`world` 与 `odom` 的数值关系、
+  IMU 杆臂与角速度、真实洞净高与实车最低包络、实车任何操作。
+
 ## 2026-10-06：Mode 2 洞口—坡道往返与无支撑面六航点预览
 
 两个实验都是**无界面运行（CONFIRMED，当轮实测）**；GUI 未操作，RViz 图形交互仍未验收。

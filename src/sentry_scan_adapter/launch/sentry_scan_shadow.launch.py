@@ -40,6 +40,21 @@ def _as_bool(value):
     return str(value).lower() in ("1", "true", "yes", "on")
 
 
+def _params_from_file(yaml_path):
+    """读取参数文件里所有节点的 ros__parameters（用于航点/参考路线这类只有一段的文件）。
+
+    这些示例文件里的 key 是 `/sentry_sim/<node>`，直接作为 params-file 传给
+    `/sentry_scan/<node>` 不会生效，因此在这里按键名无关的方式取出并作为 dict 覆盖。
+    """
+    with open(yaml_path) as handle:
+        data = yaml.safe_load(handle) or {}
+    merged = {}
+    for value in data.values():
+        if isinstance(value, dict):
+            merged.update(value.get("ros__parameters", {}))
+    return merged
+
+
 def _namespace_params(yaml_path, node_name, overrides):
     """读取仿真/共享 YAML 中该节点名的参数块，并叠加影子覆盖。
 
@@ -159,7 +174,7 @@ def _setup(context):
                     "grid_map.obstacles_inflation_z_down": z_down,
                     "visualization_frame_id": planning_frame,
                 }),
-            ] + ([keypoints_file] if keypoints_file else []),
+            ] + ([_params_from_file(keypoints_file)] if keypoints_file else []),
         ),
         Node(
             package="scan_planner", executable="closed_loop_controller", name="closed_loop_controller",
@@ -186,7 +201,7 @@ def _setup(context):
         nodes.append(Node(
             package="scan_planner", executable="reference_path_publisher.py",
             name="reference_path_publisher", namespace=NAMESPACE, output="screen",
-            parameters=[reference_path_file, common],
+            parameters=[_params_from_file(reference_path_file), common],
         ))
 
     if start_rviz:

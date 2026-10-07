@@ -172,6 +172,9 @@ class RmInputAdapter(Node):
             "tf": Channel("tf"),
         }
         self.health_ok = False
+        # 只有"曾经健康过"之后的失效才需要撤销任务：启动阶段输入还没到，
+        # 此时发 planning/reset 会无谓地取消不存在的任务，并会永久关掉 Mode 2 的自动起步。
+        self._ever_healthy = False
         self.active_reasons: List[str] = []
         self.jump_reason = ""
         self._last_reset_time = -1.0
@@ -543,11 +546,13 @@ class RmInputAdapter(Node):
                 self.get_logger().warn("Inputs healthy again; the previous task is NOT resumed. "
                                        "Send a new goal/path to start a new task.")
             self.health_ok = True
+            self._ever_healthy = True
             return
 
         self.health_ok = False
         self.active_reasons = reasons
-        if self.reset_on_unhealthy and (now_s - self._last_reset_time) >= self.reset_repeat_period:
+        if (self.reset_on_unhealthy and self._ever_healthy
+                and (now_s - self._last_reset_time) >= self.reset_repeat_period):
             self._last_reset_time = now_s
             reset = Bool()
             reset.data = True

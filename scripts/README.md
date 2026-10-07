@@ -44,6 +44,18 @@
 | `make_lateral_slope_map.py` | 横向坡面 + 绕障场景 |
 | `make_terrain_route.py` | 从地面网格生成 Mode 2 航点/Mode 3 路线（含沿线净空检查） |
 
+## 影子接入（I1/I2，2026-10-07）
+
+| 脚本 | 用途 |
+|---|---|
+| `test_shadow_entry.sh` | 影子场景编排与判据入口（`adapter_math`/`no_inputs`/`mode1_goal`/...；失败返回非零） |
+| `check_shadow_graph.py` | ROS 图与门控判据：禁止话题无发布者、必需节点存在、影子输出全零/yaw 置零 |
+| `fake_rm_inputs.py` | 合成 RM 输入（TF/odom/速度/云）与故障注入；**不发布速度命令** |
+| `test_shadow_adapter_math.py` | 坐标/杆臂/yaw=90°/时间门控的确定性单测（无需 ROS 图） |
+
+启动入口为 `ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py`（`start_rviz:=false` 可无界面）。
+契约与回放步骤见 [影子输入契约](../docs/interfaces/shadow_input_contract.md)。
+
 ## 诊断探针（不构成验收）
 
 | 脚本 | 用途 |

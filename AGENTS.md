@@ -2,8 +2,10 @@
 
 这是 ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 及其他算法迁移的工作区。2026-10-07 用户决定**暂停扩建仿真，进入仓库整理与 I1/I2 实车数据影子接入准备**；尚未授权底盘输出或实车运行。
 
-**交接 A 仓库整理已完成**（[整理报告](docs/migration/cleanup_report.md)）；当前等待用户批准后再执行
-[实车影子接入交接 B](docs/migration/real_robot_handoff.md)（[整理指引 A](docs/migration/cleanup_handoff.md) 已交付）。
+**交接 A 仓库整理已完成**（[整理报告](docs/migration/cleanup_report.md)）；[交接 B](docs/migration/real_robot_handoff.md)
+的 **B1/B2 已实现**：`/sentry_scan` 影子入口只读真实输入、无底盘输出，契约见
+[影子输入契约](docs/interfaces/shadow_input_contract.md)，结果见[影子验收证据](docs/testing/shadow_acceptance.md)。
+**交付到 B3 即停止**，等 Codex 审查与用户许可；I3 驱车未授权。
 实施仍在本仓库，RM 和 SCAN 参考仓库继续只读。
 保留已有仿真作回归，不扩展 Gazebo，不把无支撑面的开环航点预览接到实车。
 历史过程与证据在 [docs/archive/](docs/archive/README.md)：引用归档页必须写明“历史记录”及取代它的当前文档，
@@ -17,7 +19,11 @@
 - 本目录自 2026-10-01 起是**私有 Git 仓库**：`git@github.com:Hliiii06/adapt_VI_26_Sentry.git`，主分支 `main`。入库内容是文档、`scripts/`、`AGENTS.md`、`README.md`、`build.md` 与 `src/`（纳入本仓库的 SCAN 源码）；`artifacts/`、`log/`、`build/`、`install/` 由 `.gitignore` 排除，编译产物不入库，也不要用 `git add -f` 绕过。
 - 参考仓库（`../VI_26_Sentry`、`../../SCAN-Planner-Ros2`、`../../SCAN-Planner`）各有自己的远端，不要在本仓库提交或推送它们的源码与改动；本仓库正常提交/推送无需再逐次征求许可，但**推送前**确认没有密钥、串口配置等敏感文件被新增进跟踪范围。
 - **`src/` 是实施副本，不是参考仓库**：来源为 SCAN-Planner-Ros2 main `103bce4`，改动边界见 [实施报告](docs/migration/implementation_report.md)。不要再把 `../../SCAN-Planner-Ros2` 当作待改代码；它保持只读。RM 的 `../VI_26_Sentry` 始终只读。
-- 当前阶段：**S0–S3 已实施；地形分离与高度跟随、Codex 两轮审查的修正、受控洞口场景（高洞过/低洞拒）、RViz 实体显示、真实场地三处坐标核对均已完成；第二轮复审的 4 项实现问题（优化后才赋地形高度、显示与包络几何一致、取消立即本地锁止、越界拒绝）已修正**，尚未接入 VI_26_Sentry 实车。RViz 图形交互在本环境无法验证。实施入口见 [实施报告](docs/migration/implementation_report.md)，当轮测试证据见 [归档 S3 结果](docs/archive/s3_results.md)，地形见 [地形与高度跟随](docs/testing/terrain_following.md)，指定路线与洞口见 [真实 PCD 路线修复](docs/testing/pcd_route_fix.md)（旧的[地形核对](docs/archive/field_terrain_check.md)已归档）。
+- 当前阶段：S0–S3 与地形/洞口工作已完成；**I1/I2 影子接入已实现并通过合成输入契约测试**，
+  尚未接入 VI_26_Sentry 实车、未授权底盘输出。RViz 图形交互在本环境无法验证。
+  实施入口见 [实施报告](docs/migration/implementation_report.md)，影子实现见
+  [影子输入契约](docs/interfaces/shadow_input_contract.md)，地形见 [地形与高度跟随](docs/testing/terrain_following.md)，
+  指定路线与洞口见 [真实 PCD 路线修复](docs/testing/pcd_route_fix.md)。
 
 用户最新确认：三维导航指 SCAN 当前的三维占据/空间避障与参考高度实现，不要求自由三维或完整地形通行规划；现有 RM 配置已由用户验证 RViz 2D goal 规划并驱动实车；小陀螺部分由电控负责，仓库相关源码不代表实际执行路径。C 方向已认可，实施结果见 [实施报告](docs/migration/implementation_report.md)。
 

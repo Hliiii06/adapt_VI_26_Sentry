@@ -6,9 +6,12 @@
 ## 当前阶段（2026-10-07）
 
 - **交接 A 仓库整理已完成**：映射、保留边界与验证见[整理报告](migration/cleanup_report.md)。
-- **下一开发任务未开始**：[实车影子接入交接 B](migration/real_robot_handoff.md)，先做 I1/I2
-  影子运行，不驱动车辆；是否开始由用户批准（用户要求完成任务一后暂停）。
-- **未接实车、未授权底盘输出**；本仓库输出都在 `/sentry_sim` 命名空间内。
+- **交接 B 的 B1/B2 已实现**：`/sentry_scan` 影子入口（真实输入、无底盘输出），
+  契约见[影子输入契约](interfaces/shadow_input_contract.md)，结果见[影子验收证据](testing/shadow_acceptance.md)。
+- **B3 之后停止**：[实车影子接入交接 B](migration/real_robot_handoff.md) 的下一步是 Codex 审查与
+  用户批准的真实数据/场地影子运行；I3 驱车未授权。
+- **未接实车、未授权底盘输出**；仿真输出在 `/sentry_sim`，影子接入输出在 `/sentry_scan`，
+  两者都没有 `/cmd_vel` 发布者，也不启动 UART/Nav2。
 - 参考仓库 RM `../VI_26_Sentry`、SCAN2 `../../SCAN-Planner-Ros2`、SCAN1 `../../SCAN-Planner` 保持只读。
 
 ## 按职责找入口
@@ -17,7 +20,9 @@
 |---|---|---|
 | 工作区规则 | [AGENTS.md](../AGENTS.md) | 边界、参考路径、工程/安全规则 |
 | 构建与启动 | 根 [README.md](../README.md)、[scripts/README.md](../scripts/README.md) | 脚本分组与常用命令 |
-| 当前任务 | [交接 B](migration/real_robot_handoff.md) | I1/I2 契约、接口、测试矩阵（PROPOSED） |
+| 当前任务 | [交接 B](migration/real_robot_handoff.md) | I1/I2 剩余项、审查边界 |
+| 影子输入契约 | [shadow_input_contract.md](interfaces/shadow_input_contract.md) | `/sentry_scan` 接口、frame/时间/降级规则（唯一事实入口） |
+| 影子验收证据 | [shadow_acceptance.md](testing/shadow_acceptance.md) | 场景矩阵、判据、结果与未验证项 |
 | 阶段与门槛 | [实施计划](migration/plan.md) | S/I 阶段、执行与停止规则、回退 |
 | 进展 | [进展](migration/progress.md) | 当前状态与最近变更（历史见[归档](archive/progress_history.md)） |
 | 决策 | [决策记录](migration/decisions.md) | 状态、日期、被谁取代 |

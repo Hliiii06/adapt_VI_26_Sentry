@@ -77,6 +77,16 @@ class FakeRmInputs(Node):
         self.cloud_pub = self.create_publisher(PointCloud2, "/cloud_registered", qos_profile_sensor_data)
         self.goal_pub = self.create_publisher(PoseStamped, "/sentry_scan/move_base_simple/goal", 1)
         self.reset_pub = self.create_publisher(Bool, "/sentry_scan/planning/reset", 10)
+        # 仅用于 pairing_mismatch 场景：直接向适配器输出话题注入时间戳不一致的
+        # sensor_pose / cloud，用来验证 GridMap 的严格配对拒绝（不经过适配器）。
+        self.mismatch_sensor_pub = None
+        self.mismatch_cloud_pub = None
+        if args.mismatch_pairing:
+            self.mismatch_sensor_pub = self.create_publisher(
+                Odometry, "/sentry_scan/sensor_pose", qos_profile_sensor_data)
+            self.mismatch_cloud_pub = self.create_publisher(
+                PointCloud2, "/sentry_scan/cloud", qos_profile_sensor_data)
+            self.create_timer(0.2, self.on_mismatch_pair)
 
         self.cloud_points = self.build_room_cloud()
         self.create_timer(0.02, self.on_tf)
@@ -116,6 +126,8 @@ class FakeRmInputs(Node):
 
     # ---------------------------------------------------------------- 发布
     def on_tf(self):
+        if self.args.stop_tf_after and self.elapsed() > self.args.stop_tf_after:
+            return
         stamp = self.stamp()
         self.dyn_tf.sendTransform(
             _tf("odom", "base_link", (0.0, 0.0, 0.1), _quat_from_yaw(0.0), stamp))
@@ -123,6 +135,8 @@ class FakeRmInputs(Node):
             _tf("map", "odom", self.jump_offset, (0.0, 0.0, 0.0, 1.0), stamp))
 
     def on_odom(self):
+        if self.args.stop_odom_after and self.elapsed() > self.args.stop_odom_after:
+            return
         msg = Odometry()
         msg.header.stamp = self.stamp()
         msg.header.frame_id = "odom"
@@ -144,6 +158,21 @@ class FakeRmInputs(Node):
         header.stamp = self.stamp()
         header.frame_id = "camera_init"
         self.cloud_pub.publish(create_cloud_xyz32(header, self.cloud_points))
+
+    def on_mismatch_pair(self):
+        """故意让 sensor_pose 与 cloud 的时间戳差 0.30 s。"""
+        now = self.get_clock().now()
+        sensor = Odometry()
+        sensor.header.stamp = (now - rclpy.duration.Duration(seconds=0.30)).to_msg()
+        sensor.header.frame_id = "odom"
+        sensor.child_frame_id = "lidar_link"
+        sensor.pose.pose.position.z = 0.1
+        sensor.pose.pose.orientation.w = 1.0
+        self.mismatch_sensor_pub.publish(sensor)
+        header = Header()
+        header.stamp = now.to_msg()
+        header.frame_id = "odom"
+        self.mismatch_cloud_pub.publish(create_cloud_xyz32(header, self.cloud_points))
 
     def send_goal_once(self):
         if self._goal_sent:
@@ -182,6 +211,9 @@ def main(argv=None):
     parser.add_argument("--repeat-old-stamp", action="store_true")
     parser.add_argument("--stamp-backwards-after", type=float, default=0.0)
     parser.add_argument("--stop-cloud-after", type=float, default=0.0)
+    parser.add_argument("--stop-odom-after", type=float, default=0.0)
+    parser.add_argument("--stop-tf-after", type=float, default=0.0)
+    parser.add_argument("--mismatch-pairing", action="store_true")
     parser.add_argument("--jump-after", type=float, default=0.0)
     parser.add_argument("--cancel-after", type=float, default=0.0)
     parser.add_argument("--domain-note", default="")

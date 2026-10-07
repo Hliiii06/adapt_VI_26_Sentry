@@ -148,3 +148,30 @@ uint32 task_id
 仅其依赖的 odom 位姿源从速度积分改为样条求值。
 开环执行器不消费 `planning/task_active` 授权或 `planning/reset` 取消；终止实验用 Ctrl-C。
 详见[模式边界、六航点与证据](../testing/mode2_waypoint_z_preview.md)。
+
+
+## 影子接入话题（I1/I2，已实现）
+
+`/sentry_scan` 命名空间是**实车影子入口**（真实 RM 输入、无底盘输出）。
+契约、frame/时间/QoS 与降级规则以[影子输入契约](shadow_input_contract.md)为唯一来源；
+下表只登记端点，避免出现第二份会漂移的说明。
+
+| topic | type | 发布者 → 订阅者 | QoS | frame / 时间戳 |
+|---|---|---|---|---|
+| `/sentry_scan/body_pose` | `nav_msgs/msg/Odometry` | `rm_input_adapter` → `scan_planner_node`(FSM/GridMap)、`closed_loop_controller`、`shadow_guard` | SensorDataQoS | 规划系（默认 `odom`）；来源 stamp；`twist` 为规划系机体参考点速度 |
+| `/sentry_scan/sensor_pose` | `nav_msgs/msg/Odometry` | `rm_input_adapter` → GridMap | SensorDataQoS | 规划系射线原点；与云同一 stamp |
+| `/sentry_scan/cloud` | `sensor_msgs/msg/PointCloud2` | `rm_input_adapter` → GridMap | SensorDataQoS | 已变换到规划系；保留来源 stamp |
+| `/sentry_scan/health` | `diagnostic_msgs/msg/DiagnosticArray` | `rm_input_adapter` → 观测/记录 | reliable、volatile、depth 10 | — |
+| `/sentry_scan/health_ok` | `std_msgs/msg/Bool` | `rm_input_adapter` → `shadow_guard` | reliable + transient_local、depth 1 | — |
+| `/sentry_scan/planning/reset` | `std_msgs/msg/Bool` | `rm_input_adapter`（失效时）→ FSM、跟踪器 | reliable、volatile、depth 10 | — |
+| `/sentry_scan/cmd_vel_candidate` | `geometry_msgs/msg/Twist` | `closed_loop_controller`（`cmd_vel` remap）→ `shadow_guard` | reliable、volatile、depth 20 | 机体系 vx/vy；`angular.z` 恒 0（`yaw_candidate_enabled=false`） |
+| `/sentry_scan/cmd_vel_shadow` | `geometry_msgs/msg/Twist` | `shadow_guard` → 记录/显示 | reliable、volatile、depth 1 | 同上；**不接车** |
+
+**影子入口不存在** `/cmd_vel`、`/cmd_vel_remap`、`/sentry_scan/cmd_vel` 发布者；
+`shadow_guard` 周期检查这些话题是否被别的节点发布，一旦出现即把影子输出归零。
+`/sentry_scan` 入口不启动 `map_pub`、`pcl_render_node`、`go2_kinematic_sim`、`open_loop_controller` 或 UART。
+
+新增参数（`closed_loop_controller`）：`yaw_candidate_enabled`（默认 true，影子置 false，只影响 `angular.z`）；
+新增参数（GridMap）：`grid_map.strict_sensor_pairing`（默认 **false**，仿真行为不变）、
+`grid_map.sensor_pairing_tolerance`（默认 0.05 s）；
+新增参数（`PlanningVisualization`）：`visualization_frame_id`（默认空 = 保持上游 world/map 硬编码）。

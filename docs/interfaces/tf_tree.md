@@ -53,3 +53,15 @@ flowchart TD
 SCAN 原生发布 `grid_map.frame_id → sliding_map`（S4 `publishSlidingMapTF`）；这仅是地图滑窗显示关系，不负责 RM 定位链。不能把 simulation 的 world→base 并入实车 TF 当作定位结果。
 
 任何后续 TF 修改必须在本表记录 parent、child、publisher、位姿来源、频率、时间戳与修改原因，并检查单一发布者及无环性。
+
+## 影子接入（I1/I2）：不发布新 TF
+
+`sentry_scan_adapter` **只读 TF，不广播任何 TF**（`rm_input_adapter` 的 `planning_frame=odom`、
+`body_frame=base_link`、`sensor_frame=lidar_link` 都是已存在的 RM frame）。因此：
+
+- 不新增 `world=odom` 之类的单位变换，也不把仿真的 `world→base/sensor` 复制到实车树；
+- `scan_planner_node` 在影子命名空间下广播的滑窗 TF 是 `odom→sliding_map`（由 `grid_map.frame_id` 决定），
+  只是显示关系，不参与 RM 定位链；
+- `map→odom` 仍由 RM 的 TfTransformer/registration 发布，影子层只**查询**它做跳变监测；
+- 若 I1 确认 `base_link` 不等于规划参考中心，应通过 `body_center_offset_xyz` 参数表达杆臂，
+  而不是新造 frame 或修改 RM 的 TF。

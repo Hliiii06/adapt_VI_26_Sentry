@@ -80,3 +80,12 @@ SCAN-Planner-Ros2/src/
 | waypoint_generator | simulator/Utils/waypoint_generator | 通用 waypoint 工具 | geometry_msgs、nav_msgs、rclcpp；不是 Mode 3 的全局搜索器 |
 
 SCAN2 为原生 ROS2 ament/C++17；ROS1 对应工程为 catkin，不能把其 `catkin_make` 当成 SCAN2 命令。更不能由两个仓库同名库推断 ABI/消息兼容。
+
+## 本仓库新增的实施包（不属于上游 SCAN2）
+
+| package | 路径 | 职责 | 依赖 |
+|---|---|---|---|
+| sentry_scan_adapter | `src/sentry_scan_adapter` | RM→SCAN 影子输入适配、健康门控、影子保护与输入检查（ament_python） | rclpy、nav/sensor/geometry/std/diagnostic_msgs、tf2_ros、tf2_geometry_msgs、tf2_sensor_msgs、scan_planner_msgs |
+
+它只做适配与门控，**不含规划算法**，也不发布底盘命令；契约见
+[影子输入契约](../interfaces/shadow_input_contract.md)。
