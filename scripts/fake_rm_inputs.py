@@ -13,6 +13,11 @@
 故障注入（B3 测试矩阵）：
     --repeat-old-stamp       header.stamp 立刻固定不前进（旧消息重发）
     --freeze-stamp-after N   N 秒后把 header.stamp 固定（先正常运行再模拟旧 stamp 重发）
+    --second-goal-after T   T 秒后再发一个目标（用于验证"新任务才恢复"）
+    --fake-map-heartbeat-until / --fake-map-heartbeat-resume
+                            测试心跳在 N 秒停、M 秒恢复（验证地图锁止）
+    注入故障时会在 /sentry_scan/test/fault_marker 发布一条标记（frame_id=原因），
+    供判据脚本按**实际事件时刻**计算停车延迟。
     --stamp-backwards-after  N 秒后周期性让时间戳倒退且不再追上
     --stop-cloud-after       N 秒后停止发布点云
     --jump-after             N 秒后 map→odom 平移跳变 1.0 m
@@ -69,7 +74,12 @@ class FakeRmInputs(Node):
         self.jump_offset = (0.0, 0.0, 0.0)
         self.map_odom_offset = self._parse_offset(args.map_odom_offset)
         self._goal_sent = False
+        self._second_goal_sent = False
         self._cancelled = False
+        self._marked = set()
+        self._cloud_stopped = False
+        self._nan_started = False
+        self._heartbeat_cut = False
         self._flood_pub = None
 
         self.dyn_tf = TransformBroadcaster(self)
@@ -89,6 +99,7 @@ class FakeRmInputs(Node):
         # 目标发给 task_adapter 的输入；FSM 只接受已转换到规划系的 `goal`。
         self.goal_pub = self.create_publisher(PoseStamped, "/sentry_scan/task/goal_in", 1)
         self.reset_pub = self.create_publisher(Bool, "/sentry_scan/planning/reset", 10)
+        self.marker_pub = self.create_publisher(Header, "/sentry_scan/test/fault_marker", 10)
         # 仅用于 pairing_mismatch 场景：直接向适配器输出话题注入时间戳不一致的
         # sensor_pose / cloud，用来验证 GridMap 的严格配对拒绝（不经过适配器）。
         self.mismatch_sensor_pub = None
@@ -122,6 +133,17 @@ class FakeRmInputs(Node):
             # 只发一次：重复发目标会在取消后重新授权新任务，使"取消后不动"的判据失真。
             self.create_timer(2.5, self.send_goal_once)
 
+    def mark(self, reason: str) -> None:
+        """发布一次故障标记（每种原因只发一次），供判据脚本对齐事件时间。"""
+        if reason in self._marked:
+            return
+        self._marked.add(reason)
+        msg = Header()
+        msg.stamp = self.get_clock().now().to_msg()
+        msg.frame_id = reason
+        self.marker_pub.publish(msg)
+        self.get_logger().warn("fake RM inputs: fault marker '%s' published" % reason)
+
     @staticmethod
     def _parse_offset(text):
         parts = [p for p in (text or "").replace(";", ",").split(",") if p.strip()]
@@ -130,8 +152,14 @@ class FakeRmInputs(Node):
         return tuple(float(p) for p in parts)
 
     def on_heartbeat(self):
-        if self.elapsed() > self.args.fake_map_heartbeat_until:
-            return
+        elapsed = self.elapsed()
+        if elapsed > self.args.fake_map_heartbeat_until:
+            resuming = (self.args.fake_map_heartbeat_resume
+                        and elapsed > self.args.fake_map_heartbeat_resume)
+            if not resuming:
+                self.mark("map_heartbeat_cut")
+                return
+            self.mark("map_heartbeat_resume")
         msg = Header()
         msg.stamp = self.get_clock().now().to_msg()
         msg.frame_id = "odom"
@@ -173,6 +201,7 @@ class FakeRmInputs(Node):
         if freeze:
             if self.old_stamp is None:
                 self.old_stamp = self.get_clock().now().to_msg()
+                self.mark("stamp_freeze")
             return self.old_stamp
         now = self.get_clock().now()
         if self.backwards_offset:
@@ -182,6 +211,7 @@ class FakeRmInputs(Node):
     # ---------------------------------------------------------------- 发布
     def on_tf(self):
         if self.args.stop_tf_after and self.elapsed() > self.args.stop_tf_after:
+            self.mark("tf_stop")
             return
         stamp = self.stamp()
         self.dyn_tf.sendTransform(
@@ -193,6 +223,7 @@ class FakeRmInputs(Node):
 
     def on_odom(self):
         if self.args.stop_odom_after and self.elapsed() > self.args.stop_odom_after:
+            self.mark("odom_stop")
             return
         msg = Odometry()
         msg.header.stamp = self.stamp()
@@ -212,12 +243,15 @@ class FakeRmInputs(Node):
         elapsed = self.elapsed()
         if self.args.stop_cloud_after and elapsed > self.args.stop_cloud_after:
             if not (self.args.resume_cloud_after and elapsed > self.args.resume_cloud_after):
+                self.mark("cloud_stop")
                 return
+            self.mark("cloud_resume")
         header = Header()
         header.stamp = self.stamp()
         header.frame_id = "camera_init"
         points = self.cloud_points
         if self.args.nan_cloud_after and elapsed > self.args.nan_cloud_after:
+            self.mark("nan_cloud")
             points = [(float("nan"), float("nan"), float("nan"))] * len(self.cloud_points)
         self.cloud_pub.publish(create_cloud_xyz32(header, points))
 
@@ -236,16 +270,17 @@ class FakeRmInputs(Node):
         header.frame_id = "odom"
         self.mismatch_cloud_pub.publish(create_cloud_xyz32(header, self.cloud_points))
 
-    def send_goal_once(self):
-        if self._goal_sent:
-            return
-        self._goal_sent = True
+    def send_goal_once(self, x=None, y=None, second=False):
+        if not second:
+            if self._goal_sent:
+                return
+            self._goal_sent = True
         msg = PoseStamped()
         # 任务消息用真实当前时间：时间戳故障注入只针对 RM 传感器输入。
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.args.goal_frame
-        msg.pose.position.x = float(self.args.goal_x)
-        msg.pose.position.y = float(self.args.goal_y)
+        msg.pose.position.x = float(self.args.goal_x if x is None else x)
+        msg.pose.position.y = float(self.args.goal_y if y is None else y)
         msg.pose.position.z = 0.1
         msg.pose.orientation.w = 1.0
         self.goal_pub.publish(msg)
@@ -257,13 +292,20 @@ class FakeRmInputs(Node):
     def on_events(self):
         t = self.elapsed()
         if self.args.stamp_backwards_after and t > self.args.stamp_backwards_after:
+            self.mark("stamp_backwards")
             # 每 0.5 s 倒退 2 s：时间戳再也不追上先前值，且来源年龄持续增大。
             self.backwards_offset += 2.0
         if self.args.jump_after and t > self.args.jump_after and self.jump_offset == (0.0, 0.0, 0.0):
+            self.mark("localization_jump")
             self.jump_offset = (1.0, 0.0, 0.0)
             self.get_logger().warn("fake RM inputs: injected map->odom jump of 1.0 m")
+        if (self.args.second_goal_after and t > self.args.second_goal_after
+                and not self._second_goal_sent):
+            self._second_goal_sent = True
+            self.send_goal_once(x=self.args.second_goal_x, y=self.args.second_goal_y, second=True)
         if self.args.cancel_after and t > self.args.cancel_after and not self._cancelled:
             self._cancelled = True
+            self.mark("cancel")
             msg = Bool()
             msg.data = True
             self.reset_pub.publish(msg)
@@ -278,6 +320,10 @@ def main(argv=None):
     parser.add_argument("--stamp-backwards-after", type=float, default=0.0)
     parser.add_argument("--freeze-stamp-after", type=float, default=0.0)
     parser.add_argument("--fake-map-heartbeat-until", type=float, default=0.0)
+    parser.add_argument("--fake-map-heartbeat-resume", type=float, default=0.0)
+    parser.add_argument("--second-goal-after", type=float, default=0.0)
+    parser.add_argument("--second-goal-x", type=float, default=-1.5)
+    parser.add_argument("--second-goal-y", type=float, default=1.5)
     parser.add_argument("--stop-cloud-after", type=float, default=0.0)
     parser.add_argument("--stop-odom-after", type=float, default=0.0)
     parser.add_argument("--stop-tf-after", type=float, default=0.0)

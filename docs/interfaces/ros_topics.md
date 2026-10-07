@@ -163,12 +163,13 @@ uint32 task_id
 | `/sentry_scan/cloud` | `sensor_msgs/msg/PointCloud2` | `rm_input_adapter` → GridMap | SensorDataQoS | 已变换到规划系；保留来源 stamp |
 | `/sentry_scan/health` | `diagnostic_msgs/msg/DiagnosticArray` | `rm_input_adapter` → 观测/记录 | reliable、volatile、depth 10 | — |
 | `/sentry_scan/health_ok` | `std_msgs/msg/Bool` | `rm_input_adapter` → `shadow_guard` | reliable + transient_local、depth 1 | — |
-| `/sentry_scan/planning/reset` | `std_msgs/msg/Bool` | `rm_input_adapter`（失效时）→ FSM、跟踪器 | reliable、volatile、depth 10 | — |
+| `/sentry_scan/planning/reset` | `std_msgs/msg/Bool` | `rm_input_adapter`（输入失效时）**与** `shadow_guard`（地图停更锁止时）→ FSM、跟踪器 | reliable、volatile、depth 10 | — |
 | `/sentry_scan/task/goal_in` | `geometry_msgs/msg/PoseStamped` | RViz `2D Goal Pose`/上层 → `task_adapter` | reliable、volatile、depth 1 | **任意 frame**（由 header 指定） |
 | `/sentry_scan/goal` | `geometry_msgs/msg/PoseStamped` | `task_adapter` → FSM Mode 1 | reliable、volatile、depth 1 | 规划系（已变换） |
 | `/sentry_scan/task/path_in` | `nav_msgs/msg/Path` | 参考路线发布器/上层 → `task_adapter` | reliable + transient_local、depth 1 | **任意 frame** |
 | `/sentry_scan/initial_path` | `nav_msgs/msg/Path` | `task_adapter` → FSM Mode 3 | reliable + transient_local、depth 1 | 规划系，地面 z（`body_height` 由 SCAN 加一次） |
 | `/sentry_scan/grid_map/cloud_update` | `std_msgs/msg/Header` | GridMap → `shadow_guard` | reliable、volatile、depth 10 | 最近**被接受**的点云 stamp；拒绝的云不发布 |
+| `/sentry_scan/test/fault_marker` | `std_msgs/msg/Header` | 测试注入器 → 判据脚本 | reliable、volatile、depth 10 | **仅测试**：注入故障时的实际事件时刻（`frame_id`=原因），用于按真实时刻计算停车延迟 |
 | `/sentry_scan/cmd_vel_candidate` | `geometry_msgs/msg/Twist` | `closed_loop_controller`（`cmd_vel` remap）→ `shadow_guard` | reliable、volatile、depth 20 | 机体系 vx/vy；`angular.z` 恒 0（`yaw_candidate_enabled=false`） |
 | `/sentry_scan/cmd_vel_shadow` | `geometry_msgs/msg/Twist` | `shadow_guard` → 记录/显示 | reliable、volatile、depth 1 | 同上；**不接车** |
 
@@ -187,5 +188,6 @@ uint32 task_id
 新增参数（`task_adapter`）：`planning_frame`、`goal_in_topic`、`goal_out_topic`、`path_in_topic`、
 `path_out_topic`、`tf_future_tolerance`、`max_source_age`、`max_future_stamp`、`empty_frame_is_planning`；
 新增参数（`rm_input_adapter`）：`max_future_stamp`（默认 0.05 s）、`min_valid_points`（默认 10）；
-新增参数（`shadow_guard`）：`cloud_update_topic`、`max_map_age`（默认 0.5 s）；
+新增参数（`shadow_guard`）：`cloud_update_topic`、`max_map_age`（默认 0.5 s）、
+`task_active_topic`、`revoke_on_map_stale`（默认 true）、`revoke_repeat_period`（默认 1.0 s）；
 GridMap 新增只读心跳发布 `grid_map/cloud_update`（不改变仿真订阅/参数默认值）。

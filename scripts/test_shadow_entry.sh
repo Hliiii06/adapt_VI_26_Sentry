@@ -15,6 +15,9 @@
 #   bash scripts/test_shadow_entry.sh stamp_backwards     # 时间倒退
 #   bash scripts/test_shadow_entry.sh localization_jump   # map→odom 跳变
 #   bash scripts/test_shadow_entry.sh pairing_mismatch    # GridMap 严格配对拒绝
+#   bash scripts/test_shadow_entry.sh map_gate            # 地图停更 -> 撤销+锁止+归零
+#   bash scripts/test_shadow_entry.sh map_relatch         # 心跳恢复但无新任务：持续为零
+#   bash scripts/test_shadow_entry.sh map_relatch_newtask # 新任务授权后才解除锁止
 #   bash scripts/test_shadow_entry.sh cancel              # 取消后不重新运动
 #
 # 进程管理：影子 launch 与合成 RM 输入都用 setsid 放进各自进程组，只 kill 本次启动的
@@ -73,7 +76,8 @@ LAUNCH_ARGS=()
 case "${SCENARIO}" in
   mode2_waypoints) LAUNCH_ARGS=(navi_mode:=2 "keypoints_file:=${SHARE}/shadow_test_waypoints.yaml") ;;
   mode3_path)      LAUNCH_ARGS=(navi_mode:=3 "reference_path_file:=${SHARE}/shadow_test_reference_path.yaml") ;;
-  map_gate)        LAUNCH_ARGS=(map_update_topic:=test/map_heartbeat) ;;
+  map_gate|map_relatch|map_relatch_newtask)
+                   LAUNCH_ARGS=(map_update_topic:=test/map_heartbeat) ;;
 esac
 
 LAUNCH_PGID=""
@@ -102,11 +106,13 @@ run_fake() {  # run_fake <额外参数...>
 }
 
 # 失效/取消类场景统一用"事件前有运动 + 限时归零 + 整窗为零"的判据。
-stop_check() {  # stop_check <fault-at> <duration> [额外参数...]
+stop_check() {  # stop_check <fallback-fault-at> <duration> [额外参数...]
+  # 故障时刻优先取注入方在 /sentry_scan/test/fault_marker 上发布的标记（实际事件时间），
+  # 因此不再手工推算 zero-from —— 由判据按实际故障时刻 + stop-deadline 计算。
   local fault="$1"; shift
   local duration="$1"; shift
   python3 scripts/check_shadow_stop.py --duration "${duration}" --fault-at "${fault}" \
-    --zero-from "$(python3 -c "print(${fault}+3.0)")" --stop-deadline 3.0 --min-motion 0.2 "$@" || RC=$?
+    --stop-deadline 3.0 --min-motion 0.2 "$@" || RC=$?
 }
 
 case "${SCENARIO}" in
@@ -164,9 +170,30 @@ case "${SCENARIO}" in
     ;;
   map_gate)
     # 门控行为测试：心跳来源在 11 s 被切断，适配器仍健康、候选仍在流，
-    # guard 必须因"地图未更新"归零（用测试心跳替身，语义见 shadow_acceptance.md）。
+    # guard 必须因"地图未更新"撤销任务、锁止并归零。
     run_fake --duration 60 --send-goal --fake-map-heartbeat-until 11
     stop_check 11 30 --expect-healthy-after 15
+    if [[ "${RC}" -eq 0 ]] && ! grep -q "LATCHING" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 地图停更没有触发撤销+锁止日志" >&2
+      RC=2
+    fi
+    ;;
+  map_relatch)
+    # 地图停更 -> 撤销并锁止；心跳在 20 s 恢复但**不发新任务**：必须持续为零。
+    run_fake --duration 60 --send-goal --fake-map-heartbeat-until 11 \
+      --fake-map-heartbeat-resume 20
+    stop_check 11 30 --expect-healthy-after 22
+    if [[ "${RC}" -eq 0 ]] && grep -q "map latch cleared" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 没有新任务却解除了地图锁止" >&2
+      RC=2
+    fi
+    ;;
+  map_relatch_newtask)
+    # 同上，但 24 s 发新目标：锁止应在新任务授权（task_id 更大）且地图已恢复后解除。
+    run_fake --duration 60 --send-goal --fake-map-heartbeat-until 11 \
+      --fake-map-heartbeat-resume 20 --second-goal-after 24
+    stop_check 11 36 --zero-until 23 --expect-healthy-after 22 \
+      --expect-motion-after 26 --resume-at 23
     ;;
   odom_stop)
     run_fake --duration 60 --send-goal --stop-odom-after 12

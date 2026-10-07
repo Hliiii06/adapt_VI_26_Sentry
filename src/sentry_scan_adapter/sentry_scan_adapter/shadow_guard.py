@@ -15,6 +15,8 @@
     立即归零并标记 `graph_violation`。**外部**发布者（例如与影子并存的 Nav2 controller_server）
     是允许的：在线影子观察本来就要与旧导航共存，只记录数量，不阻断影子。
   * 健康状态不新鲜、候选值非有限、超过限幅、或**规划地图长时间没有接受新点云**时输出零。
+  * **地图停更等于一次任务失效**：不止临时归零，还会发布 `planning/reset` 撤销任务并**锁止**，
+    只有出现编号更大的**新任务**授权（且地图已恢复）才解除；否则心跳恢复后旧速度会被重新放行。
 """
 
 import csv
@@ -30,6 +32,7 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy, qos_profile_sensor_data)
+from scan_planner_msgs.msg import TaskAuthorization
 from std_msgs.msg import Bool, Header
 
 FORBIDDEN_TOPICS = ("/cmd_vel", "/cmd_vel_remap")
@@ -48,6 +51,11 @@ class ShadowGuard(Node):
         self.cloud_update_topic = self.declare_parameter("cloud_update_topic",
                                                          "grid_map/cloud_update").value
         self.max_map_age = float(self.declare_parameter("max_map_age", 0.5).value)
+        # 地图停更时的任务语义：撤销 + 锁止，直到新任务（task_id 更大）到来。
+        self.task_active_topic = self.declare_parameter("task_active_topic",
+                                                        "planning/task_active").value
+        self.revoke_on_map_stale = bool(self.declare_parameter("revoke_on_map_stale", True).value)
+        self.revoke_repeat_period = float(self.declare_parameter("revoke_repeat_period", 1.0).value)
         self.max_health_age = float(self.declare_parameter("max_health_age", 0.5).value)
         self.max_body_age = float(self.declare_parameter("max_body_age", 0.5).value)
         self.max_vx = float(self.declare_parameter("max_vx", 1.0).value)
@@ -64,6 +72,11 @@ class ShadowGuard(Node):
         self.body_recv: Optional[float] = None
         self.map_recv: Optional[float] = None
         self.map_stamp: Optional[float] = None
+        self.map_ever_fresh = False
+        self.map_latched = False
+        self.latched_task_id = 0
+        self.last_task_id = 0
+        self._last_revoke = -1.0
         self.external_publishers = 0
         self.candidate = Twist()
         self.candidate_recv: Optional[float] = None
@@ -81,6 +94,9 @@ class ShadowGuard(Node):
         self.create_subscription(Header, self.cloud_update_topic, self.on_map_update,
                                  QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
                                             reliability=ReliabilityPolicy.RELIABLE))
+        self.create_subscription(TaskAuthorization, self.task_active_topic, self.on_task_active,
+                                 latch_qos)
+        self.reset_pub = self.create_publisher(Bool, "planning/reset", 10)
         self.shadow_pub = self.create_publisher(
             Twist, self.shadow_topic,
             QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE))
@@ -100,7 +116,7 @@ class ShadowGuard(Node):
             self._csv = open(self._path, "w", newline="")
             self._writer = csv.writer(self._csv)
             self._writer.writerow(["wall_time", "ros_time", "health", "gate", "cand_vx", "cand_vy",
-                                   "cand_wz", "out_vx", "out_vy", "out_wz", "map_age",
+                                   "cand_wz", "out_vx", "out_vy", "out_wz", "map_age", "map_latched",
                                    "external_cmdvel_pubs", "graph_violation"])
             with open(os.path.join(self.log_dir, "shadow_%s_meta.json" % stamp), "w") as handle:
                 json.dump({
@@ -111,16 +127,17 @@ class ShadowGuard(Node):
                     "max_health_age": self.max_health_age,
                     "max_map_age": self.max_map_age,
                     "cloud_update_topic": self.cloud_update_topic,
+                    "revoke_on_map_stale": self.revoke_on_map_stale,
                     "zero_yaw_candidate": self.zero_yaw_candidate,
                     "limits": {"vx": self.max_vx, "vy": self.max_vy, "wz": self.max_wz},
                 }, handle, ensure_ascii=False, indent=2)
 
         self.get_logger().warn(
             "Shadow guard ready: candidate='%s' -> shadow='%s'. This node creates NO publisher on "
-            "%s; it only records/tees the gated candidate. Map heartbeat='%s' (max age %.2fs); "
-            "external publishers on those topics are tolerated."
+            "%s; it only records/tees the gated candidate. Map heartbeat='%s' (max age %.2fs, "
+            "revoke_on_map_stale=%s); external publishers on those topics are tolerated."
             % (self.candidate_topic, self.shadow_topic, " or ".join(FORBIDDEN_TOPICS),
-               self.cloud_update_topic, self.max_map_age))
+               self.cloud_update_topic, self.max_map_age, self.revoke_on_map_stale))
         self.check_forbidden_publishers()
 
     # ------------------------------------------------------------------ 回调
@@ -134,6 +151,46 @@ class ShadowGuard(Node):
     def on_map_update(self, msg: Header) -> None:
         self.map_recv = self._now_s()
         self.map_stamp = float(msg.stamp.sec) + float(msg.stamp.nanosec) * 1e-9
+        self.map_ever_fresh = True
+
+    def on_task_active(self, msg: TaskAuthorization) -> None:
+        if msg.task_id > self.last_task_id:
+            self.last_task_id = msg.task_id
+        if not msg.active:
+            return
+        if not self.map_latched:
+            return
+        if msg.task_id <= self.latched_task_id:
+            self.get_logger().warn(
+                "Authorization task_id=%u is not newer than the latched id=%u; map latch kept"
+                % (msg.task_id, self.latched_task_id))
+            return
+        reason = self._map_stale_reason(self._now_s())
+        if reason:
+            self.get_logger().warn(
+                "New task %u authorized but the map is still stale (%s); latch kept"
+                % (msg.task_id, reason))
+            return
+        self.map_latched = False
+        self.get_logger().warn(
+            "New task %u authorized after the map recovered; map latch cleared (old task was revoked)"
+            % msg.task_id)
+
+    def _map_stale_reason(self, now_s: float) -> str:
+        if self.map_recv is None or (now_s - self.map_recv) > self.max_map_age:
+            return "map_update_stale"
+        if self.map_stamp is None or (now_s - self.map_stamp) > self.max_map_age:
+            return "map_update_stamp_stale"
+        return ""
+
+    def _publish_reset(self, reason: str, now_s: float) -> None:
+        msg = Bool()
+        msg.data = True
+        self.reset_pub.publish(msg)
+        self._last_revoke = now_s
+        self.get_logger().error(
+            "Map update NOT healthy (%s): publishing planning/reset and LATCHING the shadow output; "
+            "only a new task (task_id > %u) with a recovered map will resume" % (reason, self.latched_task_id))
 
     def on_candidate(self, msg: Twist) -> None:
         self.candidate = msg
@@ -184,16 +241,26 @@ class ShadowGuard(Node):
         now_s = self._now_s()
         if self.graph_violation:
             return Twist(), "graph_violation"
+        # 地图停更 = 任务失效：先锁止并撤销，而不是"临时输出零、恢复后继续放行"。
+        stale_reason = self._map_stale_reason(now_s)
+        if stale_reason and self.map_ever_fresh and not self.map_latched \
+                and self.revoke_on_map_stale:
+            self.map_latched = True
+            self.latched_task_id = self.last_task_id
+            self._publish_reset(stale_reason, now_s)
+        if self.map_latched:
+            if self.revoke_on_map_stale and (now_s - self._last_revoke) >= self.revoke_repeat_period:
+                self._publish_reset(stale_reason or "map_latched", now_s)
+            return Twist(), "map_latched"
+        if stale_reason and not self.map_ever_fresh:
+            # 启动阶段还没收到过心跳：直接零，但不锁止（此时也不会有任务）。
+            return Twist(), stale_reason
         if not self.health:
             return Twist(), "inputs_unhealthy"
         if self.health_recv is None or (now_s - self.health_recv) > self.max_health_age:
             return Twist(), "health_stale"
         if self.body_recv is None or (now_s - self.body_recv) > self.max_body_age:
             return Twist(), "body_pose_stale"
-        if self.map_recv is None or (now_s - self.map_recv) > self.max_map_age:
-            return Twist(), "map_update_stale"
-        if self.map_stamp is None or (now_s - self.map_stamp) > self.max_map_age:
-            return Twist(), "map_update_stamp_stale"
         if self.candidate_recv is None or (now_s - self.candidate_recv) > self.max_health_age:
             return Twist(), "candidate_stale"
 
@@ -226,7 +293,7 @@ class ShadowGuard(Node):
                 "%.4f" % self.candidate.angular.z,
                 "%.4f" % out.linear.x, "%.4f" % out.linear.y, "%.4f" % out.angular.z,
                 "%.3f" % ((self._now_s() - self.map_recv) if self.map_recv else -1.0),
-                self.external_publishers, self.graph_violation])
+                int(self.map_latched), self.external_publishers, self.graph_violation])
 
     def destroy_node(self):
         if self._csv is not None:

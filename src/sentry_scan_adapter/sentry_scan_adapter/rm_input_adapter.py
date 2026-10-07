@@ -35,7 +35,7 @@ from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy, qos_profile_sensor_data)
 from rclpy.time import Time
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Bool
 from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
 
@@ -74,36 +74,51 @@ def _rotate(q, v: Sequence[float]) -> Tuple[float, float, float]:
 
 
 def _count_finite_points(msg) -> tuple:
-    """返回 (有效点数, 原因)。只做结构与数值检查，不做去噪/聚类。
+    """按 PointCloud2 的**消息布局**统计有限 xyz 点数，返回 (有效点数, 原因)。
 
-    - 检查 point_step/row_step/data 长度与 x/y/z 字段是否存在；
-    - 逐点提取 x/y/z 并统计三者都有限的点数（全 NaN 云返回 0）。
+    只支持一种布局，其余显式拒绝（不猜、不误读）：
+
+      * `is_bigendian == false`；
+      * x/y/z 三个字段都存在且 `datatype == FLOAT32`；
+      * `row_step >= width * point_step`、`len(data) >= height * row_step`；
+      * 字段偏移在 `point_step` 内。
+
+    行填充（`row_step > width * point_step`）按行起始地址逐点寻址，不会把填充字节当成点。
     """
+    if msg.is_bigendian:
+        return 0, "unsupported layout: is_bigendian=true"
+    if msg.width <= 0 or msg.height <= 0:
+        return 0, "empty cloud (%dx%d)" % (msg.width, msg.height)
     if msg.point_step < 12:
         return 0, "point_step=%d < 12" % msg.point_step
     if msg.row_step < msg.width * msg.point_step:
         return 0, "row_step=%d < width*point_step=%d" % (msg.row_step, msg.width * msg.point_step)
-    if len(msg.data) < msg.height * msg.row_step:
+    if msg.height * msg.row_step > len(msg.data):
         return 0, "data=%d bytes < height*row_step=%d" % (len(msg.data), msg.height * msg.row_step)
+
     offsets = {}
     for field in msg.fields:
-        if field.name in ("x", "y", "z"):
-            offsets[field.name] = field.offset
+        if field.name not in ("x", "y", "z"):
+            continue
+        if field.datatype != PointField.FLOAT32:
+            return 0, ("field %s datatype=%d is not FLOAT32(%d); layout unsupported"
+                       % (field.name, field.datatype, PointField.FLOAT32))
+        if field.offset + 4 > msg.point_step:
+            return 0, "%s offset %d exceeds point_step %d" % (field.name, field.offset, msg.point_step)
+        offsets[field.name] = field.offset
     if len(offsets) != 3:
         return 0, "missing x/y/z fields (got %s)" % sorted(offsets)
-    total = msg.height * msg.width
-    if total <= 0:
-        return 0, "empty cloud"
+
     raw = np.frombuffer(msg.data, dtype=np.uint8)
-    starts = np.arange(total, dtype=np.int64) * msg.point_step
+    # 行填充安全：每行按 row_step 起址，行内按 point_step 起址。
+    rows = np.arange(msg.height, dtype=np.int64) * msg.row_step
+    cols = np.arange(msg.width, dtype=np.int64) * msg.point_step
+    starts = (rows[:, None] + cols[None, :]).reshape(-1)
     axes = []
     for name in ("x", "y", "z"):
         off = offsets[name]
-        if off + 4 > msg.point_step:
-            return 0, "%s field offset %d exceeds point_step" % (name, off)
-        # 逐点取 4 字节再按 float32 解释（避免依赖字段类型/大小）
-        cols = np.stack([raw[starts + off + i] for i in range(4)], axis=1)
-        axes.append(cols.copy().view(np.float32).reshape(-1))
+        four_bytes = np.stack([raw[starts + off + i] for i in range(4)], axis=1)
+        axes.append(four_bytes.copy().view("<f4").reshape(-1))
     valid = np.isfinite(axes[0]) & np.isfinite(axes[1]) & np.isfinite(axes[2])
     return int(valid.sum()), ""
 

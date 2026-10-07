@@ -110,18 +110,27 @@ z 膨胀 = `robot_height/2`（默认 0.125）。
 - **未来时间戳** `stamp − now > max_future_stamp`（默认 0.05 s）→ 拒绝且**不写入历史**，
   避免一个坏 stamp 让之后所有正常消息被误判成"时间倒退"；
 - 时间戳不得倒退（`max_stamp_regression=0`）；有限值/四元数模长检查；空云拒绝；
-- **有效点检查**：结构一致（`point_step/row_step/data`、存在 x/y/z 字段）且至少
-  `min_valid_points`（默认 10）个有限 xyz 点；全 NaN 云按无效输入拒绝；
+- **有效点检查（按消息布局解析）**：只接受 `is_bigendian=false`、x/y/z 字段为 `FLOAT32` 的布局；
+  校验 `row_step ≥ width·point_step`、`len(data) ≥ height·row_step`、字段偏移在 `point_step` 内；
+  **行填充按每行起始地址寻址**；其他格式（大端、FLOAT64 等）**显式拒绝**而不是误读；
+  至少有 `min_valid_points`（默认 10）个有限 xyz 点，全 NaN 云按无效输入拒绝；
 - TF 必须存在（`require_tf=true`），否则该帧拒绝；
 - `map→odom` 平移 > 0.5 m 或旋转 > 0.35 rad 判为**定位跳变**，默认**锁止到整组重启**
   （`jump_latch_duration=0`）。
 
-**地图实际更新也纳入门控**（P1 修正）：GridMap 只在"配对通过 + 非空 + 有有效点"时发布
-`grid_map/cloud_update` 心跳；`shadow_guard` 要求心跳与其 stamp 都在 `max_map_age`（默认 0.5 s）内，
-否则影子输出归零（`map_update_stale` / `map_update_stamp_stale`）。这样"点云一直在发但地图没更新"
-（例如严格配对持续失败）不会被健康状态掩盖。
-**I1 必须核对**：心跳按云的 `header.stamp` 计时，因此真实云的 stamp 必须与本机时钟同尺度；
-若上游用传感器时钟或别的 epoch，需先对齐（或显式放宽 `max_map_age`），否则门控会一直判过期。
+**地图停更 = 一次任务失效**（两轮 P1 修正）：GridMap 只在"配对通过 + 非空 + 有有效点"时发布
+`grid_map/cloud_update` 心跳；`shadow_guard` 要求心跳与其 stamp 都在 `max_map_age`（默认 0.5 s）内。
+心跳一旦超时（且此前确实更新过），guard **不只是临时归零**，而是：
+
+1. 记录锁止编号 `latched_task_id = 当前最大 task_id`；
+2. 发布 `planning/reset` 撤销任务并**锁止**输出（`map_latched`，按 `revoke_repeat_period` 重复撤权）；
+3. 只有出现**编号更大的新任务授权**（`planning/task_active`，`task_id > latched_task_id`）
+   **且**地图已恢复时，才解除锁止。
+
+因此心跳恢复本身不会重新放行旧速度——必须有新任务。启动阶段（从未收到过心跳）只归零、不锁止，
+因为此时也不存在任务。**I1 必须核对**：心跳按云的 `header.stamp` 计时，真实云的 stamp
+需与本机时钟同尺度；若上游用传感器时钟或别的 epoch，需先对齐（或显式放宽 `max_map_age`），
+否则门控会一直判过期。
 
 不健康时：停止发布 `body_pose`/`sensor_pose`/`cloud`，并按 `reset_repeat_period` 发布
 `planning/reset` 撤销任务；跟踪器也会因 odom 超时停车并遗忘轨迹。

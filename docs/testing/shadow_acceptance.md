@@ -30,7 +30,7 @@ done
 
 最近一次完整记录：`log/shadow/final_matrix.log` 的 14 个场景**全部通过**（2026-10-07 17:02–17:08），`replay_guard` 单独执行通过，合计 **15/15**。
 
-## 二、场景矩阵（合成输入，20 个场景）
+## 二、场景矩阵（合成输入，22 个场景）
 
 | 场景 | 目的（对应交接 B3 测试） | 判据 | 结果 |
 |---|---|---|---|
@@ -52,6 +52,8 @@ done
 | `stamp_backwards` | 时间：时间戳倒退 | 同上 | **PASS** |
 | `localization_jump` | 重定位：map→odom 跳变 1.0 m | 同上 | **PASS** |
 | `recovery_no_resume` | 任务时序：失效→停车→**输入恢复** | 恢复后 `health_ok=true` 但输出仍全程为零（旧任务不复活） | **PASS** |
+| `map_relatch` | **地图锁止（复审 P1）**：心跳 11 s 停、20 s 恢复，**不发新任务** | 停更时撤销+锁止（日志 `LATCHING`）；恢复后未出现 `map latch cleared`，输出到窗末持续为零 | **PASS** |
+| `map_relatch_newtask` | **地图锁止解除（复审 P1）**：同上，24 s 发新目标 | 零窗 `[fault+3, 23]` 全零；新任务授权（`task_id` 更大）且地图恢复后运动在 26 s 后恢复 | **PASS** |
 | `pairing_mismatch` | 时间/配对：sensor_pose 与 cloud 差 0.30 s | GridMap 打印 `strict pairing ... cloud rejected` | **PASS** |
 | `cancel` | 任务时序：取消 | 事件前有运动、限时归零、整窗为零、健康保持为真 | **PASS** |
 
@@ -64,26 +66,50 @@ done
 ```bash
 for s in adapter_math replay_guard no_inputs healthy_static mode1_goal mode2_waypoints \
          mode3_path task_frame_transform nav2_coexist cloud_stop invalid_cloud map_gate \
-         odom_stop tf_stop stale_stamp stamp_backwards localization_jump \
-         recovery_no_resume pairing_mismatch cancel; do
+         map_relatch map_relatch_newtask odom_stop tf_stop stale_stamp stamp_backwards \
+         localization_jump recovery_no_resume pairing_mismatch cancel; do
   bash scripts/test_shadow_entry.sh "$s" || echo "FAILED: $s"
 done
 ```
 
-最近一次完整记录：**20/20 全部通过**（`log/shadow/final2_matrix.log`，2026-10-07 17:49–18:00；`log/` 不入库）。
+最近一次完整记录：**22/22 全部通过**（`log/shadow/final3_matrix.log`，2026-10-07 19:13–19:25；`log/` 不入库）。
 
 ## 二点五、审查修正（对照 54a1b1d–c1a2440）
 
 | 审查项 | 修正 | 证据 |
 |---|---|---|
 | **P1 缺少目标/路线坐标转换** | 新增 `task_adapter`：按消息 stamp 把 `task/goal_in`、`task/path_in` 从任意 frame 转到规划系后发布 `goal`、`initial_path`；空/未知 frame 明确拒绝。FSM 的 `move_base_simple/goal` remap 到 `goal`，Mode 3 发布器 remap 到 `task/path_in` | `task_frame_transform`：非单位 `map→odom`（dx=1, dy=1, yaw=0.3）下 goal `(2,1)`→`(0.955,-0.296)`、路线两点转换正确、未知/空 frame 无输出并留拒绝日志 |
-| **P1 健康不代表地图有效更新** | 适配层按结构+有限值校验点云（`min_valid_points`，默认 10）；GridMap 只在"配对通过+非空+有有效点"时发布 `grid_map/cloud_update` 心跳；`shadow_guard` 以 `max_map_age` 门控 | `invalid_cloud`（全 NaN 云被拒、日志 `finite xyz`、停车）与 `map_gate`（心跳切断后归零，且断言此时 `health_ok=true`）；单测含全 NaN/结构不一致云 |
+| **P1 健康不代表地图有效更新** | 适配层按**消息布局**校验点云（大端/FLOAT64/截断显式拒绝、行填充按行首址、`min_valid_points`）；GridMap 只在"配对通过+非空+有有效点"时发布 `grid_map/cloud_update` 心跳；`shadow_guard` 以 `max_map_age` 门控 | `invalid_cloud`（全 NaN 云被拒、日志 `finite xyz`、停车）与 `map_gate`（心跳切断后撤销+锁止）；单测含全 NaN/行填充/大端/FLOAT64/截断 |
 | **P2 保护层阻断与 Nav2 并行观察** | guard 只把**影子命名空间内**节点发布的 `/cmd_vel`、`/cmd_vel_remap` 判为违规；外部发布者只统计并记录 | `nav2_coexist`：外部 `controller_server` 发布 `/cmd_vel` 时，影子仍放行候选速度 |
-| **P2 失效停车可能"本来没动"** | 新增 `check_shadow_stop.py`：事件前必须有运动、限时归零、整窗为零、采样连续；失效场景一律先发目标 | `cloud_stop`/`invalid_cloud`/`map_gate`/`odom_stop`/`tf_stop`/`stale_stamp`/`stamp_backwards`/`localization_jump`/`cancel` 全部先产生 1.00 m/s 候选速度再判停车 |
+| **P2 失效停车可能"本来没动"** | 新增 `check_shadow_stop.py`：事件前必须有运动、限时归零、整窗为零、采样**首尾覆盖**且有限值；失效场景一律先发目标 | `cloud_stop`/`invalid_cloud`/`map_gate`/`map_relatch`/`odom_stop`/`tf_stop`/`stale_stamp`/`stamp_backwards`/`localization_jump`/`cancel` 全部先产生 1.00 m/s 候选速度再判停车 |
 | **P2 未来时间戳被接受并污染历史** | `max_future_stamp`（默认 0.05 s）：超限拒绝且**不更新** `last_stamp`；追加单测 | `adapter_math` 新增用例：+3600 s 被拒、历史不变、随后正常 stamp 仍被接受 |
 
 修正后既有结论不变：影子入口仍**没有**下发 `/cmd_vel` 的开关，所有场景仍断言
 影子命名空间内不存在 `/cmd_vel`/`/cmd_vel_remap` 发布者。
+
+### 实测停车延迟（按注入方标记的实际事件时刻）
+
+| 场景 | 实际事件（marker） | 最后非零 | 延迟 |
+|---|---|---|---|
+| `cloud_stop` | 12.04 s | 12.40 s | 0.360 s |
+| `invalid_cloud` | 12.38 s（nan_cloud） | 12.73 s | 0.351 s |
+| `map_gate` | 11.03 s（heartbeat_cut） | 11.39 s | 0.363 s |
+| `map_relatch` | 11.38 s（heartbeat_cut） | 11.78 s | 0.396 s |
+| `map_relatch_newtask` | 11.05 s（heartbeat_cut） | 11.41 s | 0.363 s |
+| `odom_stop` | 12.01 s | 12.46 s | 0.453 s |
+| `tf_stop` | 12.04 s | 12.19 s | 0.150 s |
+| `stale_stamp` | 11.03 s（stamp_freeze） | 11.51 s | 0.476 s |
+| `stamp_backwards` | **6.02 s**（不是固定的 11 s） | 6.39 s | 0.367 s |
+| `localization_jump` | 12.03 s | 12.88 s | 0.853 s |
+| `recovery_no_resume` | 12.38 s（cloud_stop） | 12.75 s | 0.368 s |
+
+## 二点六、第二轮复审修正（对照 34519cc）
+
+| 复审项 | 修正 | 证据 |
+|---|---|---|
+| **P1 地图恢复后自动放行旧任务** | 地图心跳停更不再只临时归零：`shadow_guard` 记录 `latched_task_id`、发布 `planning/reset` 并锁止（`map_latched`），只有**编号更大的新任务授权**且地图已恢复才解除 | `map_gate`（停更即撤销+锁止）、`map_relatch`（心跳 20 s 恢复但无新任务 → 到窗末持续为零、无 `map latch cleared`）、`map_relatch_newtask`（24 s 新目标 → 零窗到 23 s、26 s 后恢复运动，实测停更延迟 0.399 s） |
+| **P2 停车判据可在观察窗缺失时假通过** | 判据增加：首帧须在启动后 1 s 内、末帧须覆盖到 `--zero-until`、所有样本有限、按真实事件时刻计时 | 注入方在真正注入时发布 `/sentry_scan/test/fault_marker`；判据优先用该标记的本机接收时刻（输出里打印 `fault=... (marker(...))`），`--fault-at` 仅作回退；`map_relatch` 实测 `fault=11.04s (marker)` |
+| **P2 点云未按 PointCloud2 布局解析** | 只接受 `is_bigendian=false` + x/y/z 为 `FLOAT32`；校验 `row_step`/`data` 长度与字段偏移；行填充按每行起始地址寻址；其他布局**显式拒绝** | `adapter_math` 新增用例：行填充全 NaN → 0 有效点（此前误报 1）、大端被拒并给出 `is_bigendian` 原因、FLOAT64 被拒、截断被拒、行填充有效云计数正确 |
 
 ## 三、本轮新增的 SCAN 改动与回归
 

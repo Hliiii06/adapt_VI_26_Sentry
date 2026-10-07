@@ -6,17 +6,35 @@
 """
 
 import math
+import struct
 import sys
 import unittest
 
 import rclpy
 from geometry_msgs.msg import TransformStamped
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
 from std_msgs.msg import Header
 
 from sentry_scan_adapter.rm_input_adapter import (RmInputAdapter, _count_finite_points,
                                                   _pose_from_transform, _rotate)
+
+
+def _xyz_fields(offsets=(0, 4, 8), datatype=PointField.FLOAT32):
+    return [PointField(name=name, offset=off, datatype=datatype, count=1)
+            for name, off in zip(("x", "y", "z"), offsets)]
+
+
+def _raw_cloud(fields, data, width, height, point_step, row_step, bigendian=False):
+    msg = PointCloud2()
+    msg.header.frame_id = "camera_init"
+    msg.height, msg.width = height, width
+    msg.fields = fields
+    msg.is_bigendian = bigendian
+    msg.point_step, msg.row_step = point_step, row_step
+    msg.data = data
+    msg.is_dense = True
+    return msg
 
 
 def _tf(translation=(0.0, 0.0, 0.0), yaw=0.0):
@@ -180,6 +198,45 @@ class AdapterMathTest(unittest.TestCase):
         count_broken, why_broken = _count_finite_points(broken)
         self.assertEqual(count_broken, 0)
         self.assertIn("point_step", why_broken)
+
+    def test_cloud_layout_row_padding_and_endianness(self):
+        # 行填充布局：2 行 x 2 点，point_step=16（xyz + 4 字节填充），row_step=40（尾部再填充 8 字节）。
+        def payload(value):
+            row = b"".join(struct.pack("<fff", value, value, value) + b"\x00" * 4 for _ in range(2))
+            return (row + b"\x00" * 8) * 2
+
+        fields = _xyz_fields()
+        good = _raw_cloud(fields, payload(1.5), width=2, height=2, point_step=16, row_step=40)
+        count, why = _count_finite_points(good)
+        self.assertEqual((count, why), (4, ""), "row padding must not create or drop points")
+
+        nan = float("nan")
+        nan_cloud = _raw_cloud(fields, payload(nan), width=2, height=2, point_step=16, row_step=40)
+        count_nan, why_nan = _count_finite_points(nan_cloud)
+        self.assertEqual((count_nan, why_nan), (0, ""),
+                         "row-padded all-NaN cloud has zero finite points")
+
+        # 大端：同样的有限值按 >f 打包，必须显式拒绝而不是误读成有效点。
+        big = _raw_cloud(
+            fields,
+            (b"".join(struct.pack(">fff", 1.0, 2.0, 3.0) for _ in range(2)) + b"\x00" * 8) * 2,
+            width=2, height=2, point_step=16, row_step=40, bigendian=True)
+        count_big, why_big = _count_finite_points(big)
+        self.assertEqual(count_big, 0)
+        self.assertIn("is_bigendian", why_big)
+
+        # 非 FLOAT32 字段（FLOAT64）同样必须拒绝。
+        wide = _raw_cloud(_xyz_fields(offsets=(0, 8, 16), datatype=PointField.FLOAT64),
+                          b"\x00" * (24 * 2 * 2), width=2, height=2, point_step=24, row_step=48)
+        count_wide, why_wide = _count_finite_points(wide)
+        self.assertEqual(count_wide, 0)
+        self.assertIn("FLOAT32", why_wide)
+
+        # 截断数据必须拒绝。
+        short = _raw_cloud(fields, b"\x00" * 10, width=2, height=2, point_step=16, row_step=40)
+        count_short, why_short = _count_finite_points(short)
+        self.assertEqual(count_short, 0)
+        self.assertTrue(why_short)
 
     def test_pose_from_transform(self):
         pose = _pose_from_transform(_tf(translation=(1.0, 2.0, 3.0), yaw=math.pi / 2).transform)
