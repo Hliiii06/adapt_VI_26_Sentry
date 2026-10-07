@@ -77,7 +77,21 @@ bash scripts/scenario.sh mode2_waypoints # 通过
 bash scripts/scenario.sh cancel_race     # 通过
 ```
 
-## 四、未验证 / 未完成（不得写成已通过）
+## 四、对应交接 B3 测试表的覆盖对照
+
+| 交接 B3 要求 | 覆盖情况 |
+|---|---|
+| 启动隔离 | `no_inputs`：无模拟 odom/雷达/Go2/UART 节点，且禁止话题无发布者 |
+| frame/杆臂/速度样例 | `adapter_math`：yaw=90° 旋转、杆臂 `v_center = v_point + ω × R·offset`、缺 TF 降级 |
+| 时间/QoS | `healthy_static`（端点可连接、频率、配对）+ `stale_stamp` + `stamp_backwards` |
+| 三模式 | `mode1_goal` / `mode2_waypoints` / `mode3_path` |
+| 输入失效 | `cloud_stop` / `odom_stop` / `tf_stop` / `localization_jump` |
+| 任务时序 | `cancel`；**延迟旧授权/旧轨迹**由既有仿真 `cancel_race` 覆盖（同一 `TaskAuthorization` + `planning/reset` 实现），影子矩阵未重复 |
+| 重定位 | `localization_jump` |
+| 碰撞/高度 | 影子 launch 使用真实尺寸参数（R=0.26/H=0.25、单圆柱包络）；**碰撞逻辑本身不在影子矩阵重跑**，仍以受控仿真场景（`gap_edge`/`low_obstacle`/`terrain_tunnel_low`）为证据。真实洞净高与实车最低包络 UNKNOWN |
+| 回放安全 | `replay_guard`（非隔离 domain / 无 `/clock` 必须拒绝）+ 契约第七节步骤 |
+
+## 五、未验证 / 未完成（不得写成已通过）
 
 1. **真实 RM 数据影子验收（I2 核心）**：无录包、无场地许可，未做；契约测试只覆盖合成消息。
    `world` 与 `odom` 的数值关系、`/LIVO2/imu_propagate` 的角速度与 IMU 杆臂均 **UNKNOWN**，
@@ -88,7 +102,7 @@ bash scripts/scenario.sh cancel_race     # 通过
 4. **RViz 图形交互**：本环境创建不了 OpenGL 上下文，未验证影子 RViz 配置的实际显示。
 5. **I3 驱车**：未授权；影子入口没有任何下发 `/cmd_vel` 的开关。
 
-## 五、本轮发现的既有问题（不在本次修复范围）
+## 六、本轮发现的既有问题（不在本次修复范围）
 
 - **Mode 2 短航点段的可行性失败**：在默认参数（`manager.max_vel=1.0`、`manager.max_acc=0.5`、
   `manager.feasibility_tolerance=0.5`）下，≤1.5 m 的航点段会连续报
