@@ -8,13 +8,22 @@
                           │                                        closed_loop_controller
                           │                                                     │ cmd_vel -> cmd_vel_candidate
                           └── health/health_ok ──> shadow_guard <──────────────┘
-                                                       │
+                                                       │            ▲
+                                                       │            └── grid_map/cloud_update（地图真的在更新吗）
                                                        └─> cmd_vel_shadow（只记录/显示，不接车）
+
+    任务侧：RViz/上层目标 ──> task/goal_in ──> task_adapter ──> goal ──> FSM (Mode 1)
+            参考路线发布器 ──> task/path_in ──> task_adapter ──> initial_path ──> FSM (Mode 3)
+
+    task_adapter 按消息时间戳把目标/路线从它们的 header.frame_id 转换到规划系；
+    FSM 本身不做 frame 变换，因此**不能**把 map 下的坐标直接接进 FSM。
 
 本入口的硬性边界：
   * **没有**“下发真实命令”的开关；不启动 UART、Nav2、LIO、registration、机器人驱动、
     运动模拟器或 PCD 渲染。RM 原有链由它自己的部署入口启动，本文件只订阅其话题与 TF。
   * 不启动 `open_loop_controller`（它直接发布模拟里程计，不是实车接口）。
+  * 目标与参考路线一律经过 `task_adapter` 做显式坐标变换；空 frame 或查不到 TF 的输入被拒绝。
+    Mode 2 的航点来自参数文件，按约定必须是**规划系**坐标（配置期输入，不做运行期变换）。
   * `shadow_guard` 只创建 `cmd_vel_shadow` 发布者，并周期检查 ROS 图中是否出现
     `/cmd_vel`、`/cmd_vel_remap` 发布者；一旦出现影子输出立即归零。
 
@@ -153,6 +162,7 @@ def _setup(context):
         Node(
             package="scan_planner", executable="scan_planner_node", name="scan_planner_node",
             namespace=NAMESPACE, output="screen",
+            remappings=[("move_base_simple/goal", "goal")],
             parameters=[
                 _namespace_params(planner_yaml, "scan_planner_node", {
                     **common,
@@ -191,7 +201,16 @@ def _setup(context):
         Node(
             package="sentry_scan_adapter", executable="shadow_guard", name="shadow_guard",
             namespace=NAMESPACE, output="screen",
-            parameters=[contract_yaml, common, {"log_dir": log_dir}],
+            parameters=[contract_yaml, common, {
+                "log_dir": log_dir,
+                "cloud_update_topic": value("map_update_topic"),
+                "max_map_age": float(value("max_map_age")),
+            }],
+        ),
+        Node(
+            package="sentry_scan_adapter", executable="task_adapter", name="task_adapter",
+            namespace=NAMESPACE, output="screen",
+            parameters=[contract_yaml, common, {"planning_frame": planning_frame}],
         ),
     ]
 
@@ -201,6 +220,7 @@ def _setup(context):
         nodes.append(Node(
             package="scan_planner", executable="reference_path_publisher.py",
             name="reference_path_publisher", namespace=NAMESPACE, output="screen",
+            remappings=[("initial_path", "task/path_in")],
             parameters=[_params_from_file(reference_path_file), common],
         ))
 
@@ -248,6 +268,10 @@ def generate_launch_description():
         DeclareLaunchArgument("strict_sensor_pairing", default_value="true",
                               description="GridMap 要求云与其射线原点按时间戳配对"),
         DeclareLaunchArgument("sensor_pairing_tolerance", default_value="0.02"),
+        DeclareLaunchArgument("map_update_topic", default_value="grid_map/cloud_update",
+                              description="规划地图接受新点云的心跳话题"),
+        DeclareLaunchArgument("max_map_age", default_value="0.5",
+                              description="心跳超过该时间影子输出归零"),
         DeclareLaunchArgument("start_rviz", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="false",
                               description="仅回放时为 true，且必须有 /clock"),

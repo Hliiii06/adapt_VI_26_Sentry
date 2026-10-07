@@ -175,6 +175,7 @@ void GridMap::initMap(rclcpp::Node *node)
   unknown_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("grid_map/unknown", rclcpp::SensorDataQoS());
   depth_cloud_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("grid_map/depth_cloud", rclcpp::SensorDataQoS());
   extrinsic_pose_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>("grid_map/sensor_pose_extrinsic", 10);
+  cloud_update_pub_ = node_->create_publisher<std_msgs::msg::Header>("grid_map/cloud_update", 10);
 
   md_.occ_need_update_ = false;
   md_.use_cloud_update_ = false;
@@ -934,7 +935,12 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr 
   md_.has_cloud_ = true;
 
   if (latest_cloud.points.size() == 0)
+  {
+    // 空云不发布 cloud_update：它不构成一次有效地图更新。
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                         "[GridMap] empty cloud received; not counted as a map update");
     return;
+  }
 
   const Eigen::Matrix3d sensor_r = md_.ray_q_.toRotationMatrix();
   const Eigen::Vector3d ray_pos = md_.ray_pos_;
@@ -982,6 +988,13 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr 
 
   md_.use_cloud_update_ = true;
   md_.occ_need_update_ = true;
+
+  // 只有真正接受了这帧云（配对通过、非空、且有有效点）才发布心跳，
+  // 供影子保护层把"地图是否在更新"纳入门控。
+  std_msgs::msg::Header update;
+  update.stamp = img->header.stamp;
+  update.frame_id = mp_.frame_id_;
+  cloud_update_pub_->publish(update);
 }
 
 void GridMap::publishMap()

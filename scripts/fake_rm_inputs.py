@@ -11,12 +11,21 @@
 故意**不**发布任何速度命令；它不是车辆接口，也不代表真实传感器噪声模型。
 
 故障注入（B3 测试矩阵）：
-    --repeat-old-stamp       header.stamp 固定不前进（旧消息重发）
+    --repeat-old-stamp       header.stamp 立刻固定不前进（旧消息重发）
+    --freeze-stamp-after N   N 秒后把 header.stamp 固定（先正常运行再模拟旧 stamp 重发）
     --stamp-backwards-after  N 秒后周期性让时间戳倒退且不再追上
     --stop-cloud-after       N 秒后停止发布点云
     --jump-after             N 秒后 map→odom 平移跳变 1.0 m
     --cancel-after           N 秒后发布 planning/reset
-    --send-goal              发布一个 Mode 1 目标
+    --send-goal              发布一个 Mode 1 目标（默认发给 task/goal_in，frame 见 --goal-frame）
+    --goal-frame            目标/路线的 frame（默认 odom；设成 map 可测坐标变换）
+    --map-odom-offset       非单位 map->odom："dx,dy,yaw"（默认 0,0,0）
+    --nan-cloud-after       N 秒后把云换成全 NaN（测"有消息但无有效点"）
+    --stop-cloud-after      N 秒后停止发布云；--resume-cloud-after M 秒后恢复
+    --spoof-nav2-cmdvel     由另一个名为 controller_server 的节点发布 /cmd_vel（测与 Nav2 并存）
+    --flood-stale-sensor-pose-after
+                            N 秒后以 50 Hz 向 /sentry_scan/sensor_pose 注入过期时间戳
+                            （让 GridMap 严格配对持续拒绝适配器的云，但适配器本身仍然健康）
 """
 
 import argparse
@@ -58,8 +67,10 @@ class FakeRmInputs(Node):
         self.old_stamp = None
         self.backwards_offset = 0.0
         self.jump_offset = (0.0, 0.0, 0.0)
+        self.map_odom_offset = self._parse_offset(args.map_odom_offset)
         self._goal_sent = False
         self._cancelled = False
+        self._flood_pub = None
 
         self.dyn_tf = TransformBroadcaster(self)
         self.static_tf = StaticTransformBroadcaster(self)
@@ -75,7 +86,8 @@ class FakeRmInputs(Node):
         self.odom_pub = self.create_publisher(Odometry, "/Odometry_transformed", qos_profile_sensor_data)
         self.vel_pub = self.create_publisher(Odometry, "/LIVO2/imu_propagate", qos_profile_sensor_data)
         self.cloud_pub = self.create_publisher(PointCloud2, "/cloud_registered", qos_profile_sensor_data)
-        self.goal_pub = self.create_publisher(PoseStamped, "/sentry_scan/move_base_simple/goal", 1)
+        # 目标发给 task_adapter 的输入；FSM 只接受已转换到规划系的 `goal`。
+        self.goal_pub = self.create_publisher(PoseStamped, "/sentry_scan/task/goal_in", 1)
         self.reset_pub = self.create_publisher(Bool, "/sentry_scan/planning/reset", 10)
         # 仅用于 pairing_mismatch 场景：直接向适配器输出话题注入时间戳不一致的
         # sensor_pose / cloud，用来验证 GridMap 的严格配对拒绝（不经过适配器）。
@@ -88,6 +100,18 @@ class FakeRmInputs(Node):
                 PointCloud2, "/sentry_scan/cloud", qos_profile_sensor_data)
             self.create_timer(0.2, self.on_mismatch_pair)
 
+        # 与 Nav2 并存的场景由独立进程 scripts/spoof_nav2_cmdvel.py 提供（节点名 controller_server），
+        # 避免在同一进程里创建第二个节点导致定时器不执行。
+        if args.flood_stale_sensor_pose_after:
+            self._flood_pub = self.create_publisher(
+                Odometry, "/sentry_scan/sensor_pose", qos_profile_sensor_data)
+            self.create_timer(0.02, self.on_flood_stale_sensor_pose)
+        # 测试用"地图心跳"替身：只用于验证 shadow_guard 的心跳门控行为。
+        self._heartbeat_pub = None
+        if args.fake_map_heartbeat_until:
+            self._heartbeat_pub = self.create_publisher(Header, "/sentry_scan/test/map_heartbeat", 10)
+            self.create_timer(0.1, self.on_heartbeat)
+
         self.cloud_points = self.build_room_cloud()
         self.create_timer(0.02, self.on_tf)
         self.create_timer(0.02, self.on_odom)
@@ -97,6 +121,35 @@ class FakeRmInputs(Node):
         if args.send_goal:
             # 只发一次：重复发目标会在取消后重新授权新任务，使"取消后不动"的判据失真。
             self.create_timer(2.5, self.send_goal_once)
+
+    @staticmethod
+    def _parse_offset(text):
+        parts = [p for p in (text or "").replace(";", ",").split(",") if p.strip()]
+        if len(parts) != 3:
+            raise ValueError("--map-odom-offset expects dx,dy,yaw")
+        return tuple(float(p) for p in parts)
+
+    def on_heartbeat(self):
+        if self.elapsed() > self.args.fake_map_heartbeat_until:
+            return
+        msg = Header()
+        msg.stamp = self.get_clock().now().to_msg()
+        msg.frame_id = "odom"
+        self._heartbeat_pub.publish(msg)
+
+    def on_flood_stale_sensor_pose(self):
+        if not self.args.flood_stale_sensor_pose_after:
+            return
+        if self.elapsed() < self.args.flood_stale_sensor_pose_after:
+            return
+        msg = Odometry()
+        base = self.get_clock().now()
+        msg.header.stamp = (base - rclpy.duration.Duration(seconds=1.0)).to_msg()
+        msg.header.frame_id = "odom"
+        msg.child_frame_id = "lidar_link"
+        msg.pose.pose.position.z = 0.1
+        msg.pose.pose.orientation.w = 1.0
+        self._flood_pub.publish(msg)
 
     @staticmethod
     def build_room_cloud():
@@ -115,7 +168,9 @@ class FakeRmInputs(Node):
         return time.time() - self.t0
 
     def stamp(self):
-        if self.args.repeat_old_stamp:
+        freeze = self.args.repeat_old_stamp or (
+            self.args.freeze_stamp_after and self.elapsed() > self.args.freeze_stamp_after)
+        if freeze:
             if self.old_stamp is None:
                 self.old_stamp = self.get_clock().now().to_msg()
             return self.old_stamp
@@ -131,8 +186,10 @@ class FakeRmInputs(Node):
         stamp = self.stamp()
         self.dyn_tf.sendTransform(
             _tf("odom", "base_link", (0.0, 0.0, 0.1), _quat_from_yaw(0.0), stamp))
+        dx, dy, dyaw = self.map_odom_offset
+        offset = (dx + self.jump_offset[0], dy + self.jump_offset[1], self.jump_offset[2])
         self.dyn_tf.sendTransform(
-            _tf("map", "odom", self.jump_offset, (0.0, 0.0, 0.0, 1.0), stamp))
+            _tf("map", "odom", offset, _quat_from_yaw(dyaw), stamp))
 
     def on_odom(self):
         if self.args.stop_odom_after and self.elapsed() > self.args.stop_odom_after:
@@ -152,12 +209,17 @@ class FakeRmInputs(Node):
         self.vel_pub.publish(msg)
 
     def on_cloud(self):
-        if self.args.stop_cloud_after and self.elapsed() > self.args.stop_cloud_after:
-            return
+        elapsed = self.elapsed()
+        if self.args.stop_cloud_after and elapsed > self.args.stop_cloud_after:
+            if not (self.args.resume_cloud_after and elapsed > self.args.resume_cloud_after):
+                return
         header = Header()
         header.stamp = self.stamp()
         header.frame_id = "camera_init"
-        self.cloud_pub.publish(create_cloud_xyz32(header, self.cloud_points))
+        points = self.cloud_points
+        if self.args.nan_cloud_after and elapsed > self.args.nan_cloud_after:
+            points = [(float("nan"), float("nan"), float("nan"))] * len(self.cloud_points)
+        self.cloud_pub.publish(create_cloud_xyz32(header, points))
 
     def on_mismatch_pair(self):
         """故意让 sensor_pose 与 cloud 的时间戳差 0.30 s。"""
@@ -179,14 +241,18 @@ class FakeRmInputs(Node):
             return
         self._goal_sent = True
         msg = PoseStamped()
-        msg.header.stamp = self.stamp()
-        msg.header.frame_id = "odom"
-        msg.pose.position.x = 2.0
-        msg.pose.position.y = 0.0
+        # 任务消息用真实当前时间：时间戳故障注入只针对 RM 传感器输入。
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self.args.goal_frame
+        msg.pose.position.x = float(self.args.goal_x)
+        msg.pose.position.y = float(self.args.goal_y)
         msg.pose.position.z = 0.1
         msg.pose.orientation.w = 1.0
         self.goal_pub.publish(msg)
-        self.get_logger().info("fake RM inputs: sent Mode 1 goal (2.0, 0.0) in odom")
+        self.get_logger().info(
+            "fake RM inputs: sent Mode 1 goal (%.2f, %.2f) in frame '%s' to %s"
+            % (msg.pose.position.x, msg.pose.position.y, self.args.goal_frame,
+               self.goal_pub.topic_name))
 
     def on_events(self):
         t = self.elapsed()
@@ -210,10 +276,19 @@ def main(argv=None):
     parser.add_argument("--send-goal", action="store_true")
     parser.add_argument("--repeat-old-stamp", action="store_true")
     parser.add_argument("--stamp-backwards-after", type=float, default=0.0)
+    parser.add_argument("--freeze-stamp-after", type=float, default=0.0)
+    parser.add_argument("--fake-map-heartbeat-until", type=float, default=0.0)
     parser.add_argument("--stop-cloud-after", type=float, default=0.0)
     parser.add_argument("--stop-odom-after", type=float, default=0.0)
     parser.add_argument("--stop-tf-after", type=float, default=0.0)
     parser.add_argument("--mismatch-pairing", action="store_true")
+    parser.add_argument("--resume-cloud-after", type=float, default=0.0)
+    parser.add_argument("--nan-cloud-after", type=float, default=0.0)
+    parser.add_argument("--flood-stale-sensor-pose-after", type=float, default=0.0)
+    parser.add_argument("--goal-x", type=float, default=2.0)
+    parser.add_argument("--goal-y", type=float, default=0.0)
+    parser.add_argument("--goal-frame", default="odom")
+    parser.add_argument("--map-odom-offset", default="0,0,0")
     parser.add_argument("--jump-after", type=float, default=0.0)
     parser.add_argument("--cancel-after", type=float, default=0.0)
     parser.add_argument("--domain-note", default="")

@@ -18,8 +18,8 @@
 | 世界/规划系点云 | `/cloud_registered` | sensor_msgs/PointCloud2 | MINOR_ADAPTATION | camera_init 到规划系的时刻对齐；`cloud_is_world=true` 时禁用重复外参；保留地形信息 | **已实现**：adapter 变换到规划系，SCAN 侧 `cloud_is_world=true`/`need_extrinsic=false` |
 | 已过滤点云 | `/pointcloud` | sensor_msgs/PointCloud2 | MAJOR_ADAPTATION | 现为 base_footprint 且按高度截断；适合作障碍候选，首期优先 `/cloud_registered` | 未实现 |
 | TF/规划 frame | map→odom→base_link→base_footprint | tf2 | MAJOR_ADAPTATION | SCAN callback 不自动查 TF、可视化硬编码；需要统一契约和重定位策略 | **影子取 `odom`（PROPOSED，待 I1）**；可视化 frame 已可配置；map→odom 跳变会撤销任务 |
-| Mode 1 goal | RViz / 决策目标 | PoseStamped / BT blackboard / Nav2 action | MINOR_ADAPTATION | 单个可视化目标可转换 topic/frame；生产任务需额外 action/状态适配 | 仿真 Mode 1 已实现；RM 目标适配未实现 |
-| Mode 3 reference path | Nav2 ComputePathToPose 结果 | nav_msgs/Path | MAJOR_ADAPTATION | C 首期使用已知参考 xyz 路线，地面 z + `body_height` 只加一次；不默认接 Nav2 Path | 仿真 Mode 3 已实现；RM 路线适配未实现 |
+| Mode 1 goal | RViz / 决策目标 | PoseStamped / BT blackboard / Nav2 action | MINOR_ADAPTATION | 单个可视化目标可转换 topic/frame；生产任务需额外 action/状态适配 | **已实现**：`task_adapter` 按消息 stamp 把任意 frame 的目标转到规划系；空/未知 frame 拒绝 |
+| Mode 3 reference path | Nav2 ComputePathToPose 结果 | nav_msgs/Path | MAJOR_ADAPTATION | C 首期使用已知参考 xyz 路线，地面 z + `body_height` 只加一次；不默认接 Nav2 Path | **已实现**：`task_adapter` 转换 `task/path_in` → `initial_path`（规划系） |
 | 自由跨层/地形全局搜索 | 当前未纳入目标 | — | OUT_OF_SCOPE | 用户目标是 SCAN 当前实现；不作为首期迁移阻断项 | — |
 | robot geometry | local radius .26、global radius .03、实际尺寸 | 参数/模型 | MAJOR_ADAPTATION | 上游双圆柱、方向取切线；需实际尺寸及旋转包络 | **已实施**：`offset=0` 单圆柱（半径 0.26 + `safety_margin`） |
 | holonomic motion | MPPI Omni、UART vel_x/vel_y | Twist、自定义帧 | MAJOR_ADAPTATION | 上游要求 yaw 对齐，RM yaw 模式不同 | **已实施**：取消对齐门槛，新增 `yaw_mode`(hold/align/spin) |

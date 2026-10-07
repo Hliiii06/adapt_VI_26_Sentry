@@ -8,6 +8,24 @@
 **本页不授权任何底盘输出**：影子入口没有"下发真实命令"的开关，不启动 UART/Nav2/LIO/registration/
 机器人/运动模拟器。I3 驱车另行授权（见[交接 B](../migration/real_robot_handoff.md)）。
 
+## 零点五、任务/路线坐标契约（P1 修正）
+
+SCAN 的 FSM **不按 `header.frame_id` 做任何变换**，把收到的数值直接当规划系坐标。因此影子入口
+在 FSM 之前插入 `task_adapter`，目标与路线都必须经过它：
+
+| 方向 | 话题 | 类型 / QoS | frame 与时间 |
+|---|---|---|---|
+| 输入 | `task/goal_in` | PoseStamped / reliable·volatile·1 | **任意 frame**；按消息 stamp 转换 |
+| 输出 | `goal` | PoseStamped / reliable·volatile·1 | 规划系；保留输入 stamp，接 FSM Mode 1 |
+| 输入 | `task/path_in` | Path / reliable·transient_local·1 | **任意 frame**；整条路线用消息 stamp 的单一 TF |
+| 输出 | `initial_path` | Path / reliable·transient_local·1 | 规划系，地面 z；`body_height` 由 SCAN 加一次 |
+
+拒绝规则（**明确拒绝胜过猜坐标**）：空 `header.frame_id`（除非显式 `empty_frame_is_planning=true`）、
+查不到 `T_planning<-source`、stamp 缺失/未来超容差/过旧、空路线。拒绝只告警、不发布。
+查询与 `rm_input_adapter` 同一时间策略（非阻塞 + `tf_future_tolerance` 顶替）。
+
+Mode 2 的航点来自参数文件，是**配置期输入**，按约定必须是规划系坐标；运行期不做变换（launch 注释已写明）。
+
 ## 一、坐标系与参考点（PROPOSED，待 I1 核对）
 
 | 名称 | 参数 | 默认 | 含义与风险 |
@@ -89,10 +107,21 @@ z 膨胀 = `robot_height/2`（默认 0.125）。
 
 - 来源年龄 `now − header.stamp ≤ max_source_age`（默认 0.5 s）：**旧 stamp 反复重发不会绕过**；
 - 接收年龄 `now − 本机收到时刻 ≤ max_receive_age`（默认 0.5 s）：输入停发即失效；
+- **未来时间戳** `stamp − now > max_future_stamp`（默认 0.05 s）→ 拒绝且**不写入历史**，
+  避免一个坏 stamp 让之后所有正常消息被误判成"时间倒退"；
 - 时间戳不得倒退（`max_stamp_regression=0`）；有限值/四元数模长检查；空云拒绝；
+- **有效点检查**：结构一致（`point_step/row_step/data`、存在 x/y/z 字段）且至少
+  `min_valid_points`（默认 10）个有限 xyz 点；全 NaN 云按无效输入拒绝；
 - TF 必须存在（`require_tf=true`），否则该帧拒绝；
 - `map→odom` 平移 > 0.5 m 或旋转 > 0.35 rad 判为**定位跳变**，默认**锁止到整组重启**
   （`jump_latch_duration=0`）。
+
+**地图实际更新也纳入门控**（P1 修正）：GridMap 只在"配对通过 + 非空 + 有有效点"时发布
+`grid_map/cloud_update` 心跳；`shadow_guard` 要求心跳与其 stamp 都在 `max_map_age`（默认 0.5 s）内，
+否则影子输出归零（`map_update_stale` / `map_update_stamp_stale`）。这样"点云一直在发但地图没更新"
+（例如严格配对持续失败）不会被健康状态掩盖。
+**I1 必须核对**：心跳按云的 `header.stamp` 计时，因此真实云的 stamp 必须与本机时钟同尺度；
+若上游用传感器时钟或别的 epoch，需先对齐（或显式放宽 `max_map_age`），否则门控会一直判过期。
 
 不健康时：停止发布 `body_pose`/`sensor_pose`/`cloud`，并按 `reset_repeat_period` 发布
 `planning/reset` 撤销任务；跟踪器也会因 odom 超时停车并遗忘轨迹。
@@ -107,7 +136,9 @@ z 膨胀 = `robot_height/2`（默认 0.125）。
 
 - `shadow_guard` 只创建 `cmd_vel_shadow` 一个速度发布者；**不存在** `/cmd_vel`、`/cmd_vel_remap`
   或 `/sentry_scan/cmd_vel` 发布者（构造上如此，并由判据脚本核对 ROS 图）；
-- guard 周期检查上述禁止话题是否出现发布者，一旦出现立即把影子输出归零并记录 `graph_violation`；
+- guard 周期检查上述禁止话题是否被**影子命名空间内**的节点发布；若是则归零并记录 `graph_violation`。
+  **外部**发布者（并存 Nav2 的 `controller_server` 等）只统计数量、不阻断影子——在线影子观察的前提
+  就是与旧导航共存（P2 修正）；
 - `cmd_vel_shadow` 的 `linear.z`、`angular.x/y` 一律置零；`angular.z` 由
   `zero_yaw_candidate`（默认 true）置零，MCU 保留朝向所有权；
 - launch 不启动 `open_loop_controller`（它直接发布模拟里程计，不是实车接口）。

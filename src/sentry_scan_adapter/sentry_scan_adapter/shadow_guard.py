@@ -5,14 +5,16 @@
     closed_loop_controller ──/sentry_scan/cmd_vel_candidate──> 本节点
     rm_input_adapter ──/sentry_scan/health_ok───────────────> 本节点
     rm_input_adapter ──/sentry_scan/body_pose───────────────> 本节点
+    scan_planner_node ──/sentry_scan/grid_map/cloud_update──> 本节点（地图真的更新了吗）
                                                              │
                                                              └──> /sentry_scan/cmd_vel_shadow（仅记录/显示）
 
 安全边界（代码层强制）：
   * 本节点只创建 `cmd_vel_shadow` 一个速度发布者；不存在 `/cmd_vel`、`/cmd_vel_remap` 发布者。
-  * 启动后周期检查 ROS 图中 `/cmd_vel`、`/cmd_vel_remap` 是否出现发布者；一旦出现，
-    影子输出立即归零并在 CSV 中标记 `graph_violation`（失效关闭，而不是继续跟随）。
-  * 健康状态不新鲜、候选值非有限、超过限幅时输出零。
+  * 周期检查 `/cmd_vel`、`/cmd_vel_remap` 是否被**影子命名空间内**的节点发布；若是则影子输出
+    立即归零并标记 `graph_violation`。**外部**发布者（例如与影子并存的 Nav2 controller_server）
+    是允许的：在线影子观察本来就要与旧导航共存，只记录数量，不阻断影子。
+  * 健康状态不新鲜、候选值非有限、超过限幅、或**规划地图长时间没有接受新点云**时输出零。
 """
 
 import csv
@@ -28,7 +30,7 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy, qos_profile_sensor_data)
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Header
 
 FORBIDDEN_TOPICS = ("/cmd_vel", "/cmd_vel_remap")
 
@@ -41,6 +43,11 @@ class ShadowGuard(Node):
         self.candidate_topic = self.declare_parameter("candidate_topic", "cmd_vel_candidate").value
         self.shadow_topic = self.declare_parameter("shadow_topic", "cmd_vel_shadow").value
         self.body_pose_topic = self.declare_parameter("body_pose_topic", "body_pose").value
+        # 地图心跳：grid_map 只在"配对通过 + 非空 + 有有效点"时发布，
+        # 因此该话题静默 == 规划地图没有新数据（例如云全是 NaN 或配对一直失败）。
+        self.cloud_update_topic = self.declare_parameter("cloud_update_topic",
+                                                         "grid_map/cloud_update").value
+        self.max_map_age = float(self.declare_parameter("max_map_age", 0.5).value)
         self.max_health_age = float(self.declare_parameter("max_health_age", 0.5).value)
         self.max_body_age = float(self.declare_parameter("max_body_age", 0.5).value)
         self.max_vx = float(self.declare_parameter("max_vx", 1.0).value)
@@ -55,6 +62,9 @@ class ShadowGuard(Node):
         self.health = False
         self.health_recv: Optional[float] = None
         self.body_recv: Optional[float] = None
+        self.map_recv: Optional[float] = None
+        self.map_stamp: Optional[float] = None
+        self.external_publishers = 0
         self.candidate = Twist()
         self.candidate_recv: Optional[float] = None
         self.graph_violation = ""
@@ -68,6 +78,9 @@ class ShadowGuard(Node):
                                  QoSProfile(depth=20, history=HistoryPolicy.KEEP_LAST,
                                             reliability=ReliabilityPolicy.RELIABLE))
         self.create_subscription(Odometry, self.body_pose_topic, self.on_body, qos_profile_sensor_data)
+        self.create_subscription(Header, self.cloud_update_topic, self.on_map_update,
+                                 QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
+                                            reliability=ReliabilityPolicy.RELIABLE))
         self.shadow_pub = self.create_publisher(
             Twist, self.shadow_topic,
             QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE))
@@ -87,7 +100,8 @@ class ShadowGuard(Node):
             self._csv = open(self._path, "w", newline="")
             self._writer = csv.writer(self._csv)
             self._writer.writerow(["wall_time", "ros_time", "health", "gate", "cand_vx", "cand_vy",
-                                   "cand_wz", "out_vx", "out_vy", "out_wz", "graph_violation"])
+                                   "cand_wz", "out_vx", "out_vy", "out_wz", "map_age",
+                                   "external_cmdvel_pubs", "graph_violation"])
             with open(os.path.join(self.log_dir, "shadow_%s_meta.json" % stamp), "w") as handle:
                 json.dump({
                     "note": "shadow only: this node publishes cmd_vel_shadow and never /cmd_vel",
@@ -95,14 +109,18 @@ class ShadowGuard(Node):
                     "shadow_topic": self.shadow_topic,
                     "health_topic": self.health_topic,
                     "max_health_age": self.max_health_age,
+                    "max_map_age": self.max_map_age,
+                    "cloud_update_topic": self.cloud_update_topic,
                     "zero_yaw_candidate": self.zero_yaw_candidate,
                     "limits": {"vx": self.max_vx, "vy": self.max_vy, "wz": self.max_wz},
                 }, handle, ensure_ascii=False, indent=2)
 
         self.get_logger().warn(
             "Shadow guard ready: candidate='%s' -> shadow='%s'. This node creates NO publisher on "
-            "%s; it only records/tees the gated candidate."
-            % (self.candidate_topic, self.shadow_topic, " or ".join(FORBIDDEN_TOPICS)))
+            "%s; it only records/tees the gated candidate. Map heartbeat='%s' (max age %.2fs); "
+            "external publishers on those topics are tolerated."
+            % (self.candidate_topic, self.shadow_topic, " or ".join(FORBIDDEN_TOPICS),
+               self.cloud_update_topic, self.max_map_age))
         self.check_forbidden_publishers()
 
     # ------------------------------------------------------------------ 回调
@@ -113,6 +131,10 @@ class ShadowGuard(Node):
     def on_body(self, msg: Odometry) -> None:
         self.body_recv = self._now_s()
 
+    def on_map_update(self, msg: Header) -> None:
+        self.map_recv = self._now_s()
+        self.map_stamp = float(msg.stamp.sec) + float(msg.stamp.nanosec) * 1e-9
+
     def on_candidate(self, msg: Twist) -> None:
         self.candidate = msg
         self.candidate_recv = self._now_s()
@@ -121,20 +143,40 @@ class ShadowGuard(Node):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def check_forbidden_publishers(self) -> None:
+        """只禁止**影子命名空间内**的节点发布真实控制话题。
+
+        与 Nav2 并存是在线影子观察的前提：`/cmd_vel` 上出现 `controller_server` 等外部发布者
+        属于正常情况，不阻断影子（只记录数量）。若影子自己的节点（同命名空间）发布了
+        `/cmd_vel`/`/cmd_vel_remap`，那才是配置错误，必须失效关闭。
+        """
+        own_ns = self.get_namespace().rstrip("/") or "/"
         violation = ""
+        external = 0
         for topic in FORBIDDEN_TOPICS:
             try:
                 infos = self.get_publishers_info_by_topic(topic)
             except Exception as exc:  # graph API failures must not silently pass
                 violation = "graph_query_failed(%s:%s)" % (topic, exc)
                 break
-            if infos:
-                violation = "%s has %d publisher(s)" % (topic, len(infos))
+            for info in infos:
+                namespace = (info.node_namespace or "/").rstrip("/") or "/"
+                if namespace == own_ns:
+                    violation = "%s is published by shadow node %s%s" % (
+                        topic, namespace, info.node_name)
+                    break
+                external += 1
+            if violation:
                 break
+        if external != self.external_publishers:
+            self.get_logger().warn(
+                "External publisher(s) on %s observed: %d (coexistence with the existing stack; "
+                "shadow output is NOT blocked by them)"
+                % ("/".join(FORBIDDEN_TOPICS), external))
+        self.external_publishers = external
         if violation and violation != self.graph_violation:
             self.get_logger().error(
-                "GRAPH VIOLATION: %s. Shadow output is forced to zero; this build must never drive "
-                "the chassis." % violation)
+                "GRAPH VIOLATION: %s. Shadow output is forced to zero; shadow nodes must never "
+                "publish real control topics." % violation)
         self.graph_violation = violation
 
     # ------------------------------------------------------------------ 门控
@@ -148,6 +190,10 @@ class ShadowGuard(Node):
             return Twist(), "health_stale"
         if self.body_recv is None or (now_s - self.body_recv) > self.max_body_age:
             return Twist(), "body_pose_stale"
+        if self.map_recv is None or (now_s - self.map_recv) > self.max_map_age:
+            return Twist(), "map_update_stale"
+        if self.map_stamp is None or (now_s - self.map_stamp) > self.max_map_age:
+            return Twist(), "map_update_stamp_stale"
         if self.candidate_recv is None or (now_s - self.candidate_recv) > self.max_health_age:
             return Twist(), "candidate_stale"
 
@@ -179,7 +225,8 @@ class ShadowGuard(Node):
                 "%.4f" % self.candidate.linear.x, "%.4f" % self.candidate.linear.y,
                 "%.4f" % self.candidate.angular.z,
                 "%.4f" % out.linear.x, "%.4f" % out.linear.y, "%.4f" % out.angular.z,
-                self.graph_violation])
+                "%.3f" % ((self._now_s() - self.map_recv) if self.map_recv else -1.0),
+                self.external_publishers, self.graph_violation])
 
     def destroy_node(self):
         if self._csv is not None:

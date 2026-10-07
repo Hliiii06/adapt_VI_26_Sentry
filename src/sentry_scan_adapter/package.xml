@@ -21,6 +21,8 @@
   <depend>tf2_geometry_msgs</depend>
   <depend>tf2_sensor_msgs</depend>
   <depend>scan_planner_msgs</depend>
+  <!-- 点云有效性检查用：只做有限值/结构判断，不做滤波 -->
+  <depend>python3-numpy</depend>
 
   <export>
     <build_type>ament_python</build_type>

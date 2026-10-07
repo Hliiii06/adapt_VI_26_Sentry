@@ -15,6 +15,7 @@
 | 轨迹时间 | 收到即 `exec_time = 0` | 按消息 `start_time` 对齐；过期/未来时间明确拒绝 |
 | 取消 | 无 `planning/reset` | FSM 与跟踪器订阅，本地立即锁止；`TaskAuthorization` 带 `task_id` |
 | 轨迹高度 | 局部起终点线性 z | **加载 `ground_grid_file` 后**：地面网格赋 z（优化后按新 XY 重赋），越出网格拒绝整条轨迹；未加载网格时仍为线性 z |
+| 点云接受心跳 | 无 | 接受一帧云（配对通过、非空、有有效点）后发布 `grid_map/cloud_update`（`std_msgs/Header`），供影子层判断地图是否真的在更新 |
 
 详见[真实 PCD 路线修复](../testing/pcd_route_fix.md)与[地形与高度跟随](../testing/terrain_following.md)。
 

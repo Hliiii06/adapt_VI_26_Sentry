@@ -24,6 +24,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
 import rclpy
 import tf2_ros
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
@@ -70,6 +71,41 @@ def _rotate(q, v: Sequence[float]) -> Tuple[float, float, float]:
         vy + w * ty + (z * tx - x * tz),
         vz + w * tz + (x * ty - y * tx),
     )
+
+
+def _count_finite_points(msg) -> tuple:
+    """返回 (有效点数, 原因)。只做结构与数值检查，不做去噪/聚类。
+
+    - 检查 point_step/row_step/data 长度与 x/y/z 字段是否存在；
+    - 逐点提取 x/y/z 并统计三者都有限的点数（全 NaN 云返回 0）。
+    """
+    if msg.point_step < 12:
+        return 0, "point_step=%d < 12" % msg.point_step
+    if msg.row_step < msg.width * msg.point_step:
+        return 0, "row_step=%d < width*point_step=%d" % (msg.row_step, msg.width * msg.point_step)
+    if len(msg.data) < msg.height * msg.row_step:
+        return 0, "data=%d bytes < height*row_step=%d" % (len(msg.data), msg.height * msg.row_step)
+    offsets = {}
+    for field in msg.fields:
+        if field.name in ("x", "y", "z"):
+            offsets[field.name] = field.offset
+    if len(offsets) != 3:
+        return 0, "missing x/y/z fields (got %s)" % sorted(offsets)
+    total = msg.height * msg.width
+    if total <= 0:
+        return 0, "empty cloud"
+    raw = np.frombuffer(msg.data, dtype=np.uint8)
+    starts = np.arange(total, dtype=np.int64) * msg.point_step
+    axes = []
+    for name in ("x", "y", "z"):
+        off = offsets[name]
+        if off + 4 > msg.point_step:
+            return 0, "%s field offset %d exceeds point_step" % (name, off)
+        # 逐点取 4 字节再按 float32 解释（避免依赖字段类型/大小）
+        cols = np.stack([raw[starts + off + i] for i in range(4)], axis=1)
+        axes.append(cols.copy().view(np.float32).reshape(-1))
+    valid = np.isfinite(axes[0]) & np.isfinite(axes[1]) & np.isfinite(axes[2])
+    return int(valid.sum()), ""
 
 
 def _pose_from_transform(transform) -> Pose:
@@ -130,6 +166,9 @@ class RmInputAdapter(Node):
         self.odom_topic = self.declare_parameter("odom_topic", "/Odometry_transformed").value
         self.velocity_topic = self.declare_parameter("velocity_topic", "/LIVO2/imu_propagate").value
         self.cloud_topic = self.declare_parameter("cloud_topic", "/cloud_registered").value
+        # 点云结构/数值检查：点数 ≠ 有效点。全 NaN 或结构不一致的云必须拒绝，
+        # 否则"有消息"会被当成"地图有更新"。
+        self.min_valid_points = int(self.declare_parameter("min_valid_points", 10).value)
         self.velocity_frame = self.declare_parameter("velocity_frame", "world").value
         # RM 的 /LIVO2/imu_propagate header 写 world，但 world 通常不是 TF 里的 frame。
         # `velocity_frame_alias` 用于显式声明"该名字在数值上等同规划系"（I1 必须核对后填写）；
@@ -140,6 +179,9 @@ class RmInputAdapter(Node):
         self.max_source_age = float(self.declare_parameter("max_source_age", 0.5).value)
         self.max_receive_age = float(self.declare_parameter("max_receive_age", 0.5).value)
         self.max_stamp_regression = float(self.declare_parameter("max_stamp_regression", 0.0).value)
+        # 未来时间戳容差：超过它的 stamp 直接拒绝，且**不更新** last_stamp
+        # （否则一个 3600 s 之后的坏 stamp 会让之后所有正常消息都被判成"时间倒退"）。
+        self.max_future_stamp = float(self.declare_parameter("max_future_stamp", 0.05).value)
         # 0 = 非阻塞查询。带 timeout 的查询会在单线程 executor 里阻塞 TF 订阅，
         # 使 tf buffer 越来越旧（实测滞后可达 1 s 以上），因此默认 0 并靠容差回退。
         self.tf_lookup_timeout = float(self.declare_parameter("tf_lookup_timeout", 0.0).value)
@@ -209,10 +251,12 @@ class RmInputAdapter(Node):
 
         self.get_logger().warn(
             "RM input adapter (SHADOW, read-only inputs). planning=%s task=%s body=%s sensor=%s "
-            "cloud_assume_planning_frame=%s require_tf=%s source_age<=%.2fs receive_age<=%.2fs"
+            "cloud_assume_planning_frame=%s require_tf=%s source_age<=%.2fs receive_age<=%.2fs "
+            "max_future_stamp=%.2fs min_valid_points=%d"
             % (self.planning_frame, self.task_frame, self.body_frame, self.sensor_frame,
                self.cloud_assume_planning_frame, self.require_tf,
-               self.max_source_age, self.max_receive_age))
+               self.max_source_age, self.max_receive_age,
+               self.max_future_stamp, self.min_valid_points))
         self.get_logger().warn(
             "This node publishes NO velocity command. Velocity is the IMU-point velocity unless "
             "imu_to_body_offset_xyz is set (require_center_velocity=%s)."
@@ -233,6 +277,12 @@ class RmInputAdapter(Node):
     def _accept_stamp(self, channel: Channel, stamp_s: float, recv_s: float) -> bool:
         if not math.isfinite(stamp_s) or stamp_s <= 1e-5:
             self._reject(channel, "missing/invalid header.stamp (%.6f)" % stamp_s)
+            return False
+        future = stamp_s - recv_s
+        if future > self.max_future_stamp:
+            self._reject(channel, "timestamp %.3f is %.3fs in the future (limit %.3fs); "
+                                  "not recorded as history"
+                         % (stamp_s, future, self.max_future_stamp))
             return False
         if channel.last_stamp is not None and stamp_s < channel.last_stamp - self.max_stamp_regression:
             self._reject(channel, "timestamp went backwards: %.3f -> %.3f"
@@ -351,6 +401,13 @@ class RmInputAdapter(Node):
         if msg.width * msg.height == 0:
             self._reject(channel, "empty point cloud (%dx%d)" % (msg.width, msg.height))
             return
+        valid_points, why = _count_finite_points(msg)
+        if valid_points < self.min_valid_points:
+            self._reject(channel, "point cloud has %d finite xyz points (< %d)%s"
+                         % (valid_points, self.min_valid_points,
+                            (": " + why) if why else ""))
+            return
+        channel.extra["valid_points"] = str(valid_points)
 
         source_frame = msg.header.frame_id
         if source_frame == self.planning_frame or (

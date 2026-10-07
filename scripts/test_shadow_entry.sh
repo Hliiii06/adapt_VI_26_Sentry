@@ -73,11 +73,14 @@ LAUNCH_ARGS=()
 case "${SCENARIO}" in
   mode2_waypoints) LAUNCH_ARGS=(navi_mode:=2 "keypoints_file:=${SHARE}/shadow_test_waypoints.yaml") ;;
   mode3_path)      LAUNCH_ARGS=(navi_mode:=3 "reference_path_file:=${SHARE}/shadow_test_reference_path.yaml") ;;
+  map_gate)        LAUNCH_ARGS=(map_update_topic:=test/map_heartbeat) ;;
 esac
 
 LAUNCH_PGID=""
 FAKE_PID=""
+SPOOF_PID=""
 cleanup() {
+  [[ -n "${SPOOF_PID}" ]] && kill "${SPOOF_PID}" 2>/dev/null
   [[ -n "${FAKE_PID}" ]] && kill "${FAKE_PID}" 2>/dev/null
   [[ -n "${LAUNCH_PGID}" ]] && kill -- "-${LAUNCH_PGID}" 2>/dev/null
   wait 2>/dev/null
@@ -96,6 +99,14 @@ run_fake() {  # run_fake <额外参数...>
   setsid python3 scripts/fake_rm_inputs.py --domain-note "${SCENARIO}" "$@" \
     > "${LOG_DIR}/fake_inputs.log" 2>&1 &
   FAKE_PID=$!
+}
+
+# 失效/取消类场景统一用"事件前有运动 + 限时归零 + 整窗为零"的判据。
+stop_check() {  # stop_check <fault-at> <duration> [额外参数...]
+  local fault="$1"; shift
+  local duration="$1"; shift
+  python3 scripts/check_shadow_stop.py --duration "${duration}" --fault-at "${fault}" \
+    --zero-from "$(python3 -c "print(${fault}+3.0)")" --stop-deadline 3.0 --min-motion 0.2 "$@" || RC=$?
 }
 
 case "${SCENARIO}" in
@@ -118,35 +129,70 @@ case "${SCENARIO}" in
     sleep 8
     python3 scripts/check_shadow_graph.py --duration 10 --expect-healthy --expect-motion || RC=$?
     ;;
+  task_frame_transform)
+    # 非单位 map->odom + 目标/路线都在 map 下：验证坐标变换与未知 frame 拒绝。
+    run_fake --duration 60 --map-odom-offset 1.0,1.0,0.3
+    sleep 6
+    python3 scripts/check_task_adapter.py || RC=$?
+    if ! grep -q "empty header.frame_id" "${LOG_DIR}/launch.log" \
+       || ! grep -q "cannot transform 'no_such_frame'" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 未看到空 frame / 未知 frame 的明确拒绝日志" >&2
+      RC=2
+    fi
+    ;;
+  nav2_coexist)
+    # 旧导航（外部命名空间）在 /cmd_vel 上发布：影子仍应放行候选速度。
+    setsid python3 scripts/spoof_nav2_cmdvel.py --duration 60 \
+      > "${LOG_DIR}/spoof_nav2.log" 2>&1 &
+    SPOOF_PID=$!
+    run_fake --duration 60 --send-goal
+    sleep 6
+    python3 scripts/check_shadow_graph.py --duration 10 --expect-healthy --expect-motion || RC=$?
+    kill "${SPOOF_PID}" 2>/dev/null
+    ;;
   cloud_stop)
-    run_fake --duration 60 --stop-cloud-after 8
-    sleep 12
-    python3 scripts/check_shadow_graph.py --duration 6 --expect-unhealthy --expect-zero || RC=$?
+    run_fake --duration 60 --send-goal --stop-cloud-after 12
+    stop_check 11 30
+    ;;
+  invalid_cloud)
+    run_fake --duration 60 --send-goal --nan-cloud-after 12
+    stop_check 11 30
+    if [[ "${RC}" -eq 0 ]] && ! grep -q "finite xyz" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 全 NaN 点云没有被适配层按有效点检查拒绝" >&2
+      RC=2
+    fi
+    ;;
+  map_gate)
+    # 门控行为测试：心跳来源在 11 s 被切断，适配器仍健康、候选仍在流，
+    # guard 必须因"地图未更新"归零（用测试心跳替身，语义见 shadow_acceptance.md）。
+    run_fake --duration 60 --send-goal --fake-map-heartbeat-until 11
+    stop_check 11 30 --expect-healthy-after 15
     ;;
   odom_stop)
-    run_fake --duration 60 --stop-odom-after 8
-    sleep 12
-    python3 scripts/check_shadow_graph.py --duration 6 --expect-unhealthy --expect-zero || RC=$?
+    run_fake --duration 60 --send-goal --stop-odom-after 12
+    stop_check 11 30
     ;;
   tf_stop)
-    run_fake --duration 60 --stop-tf-after 8
-    sleep 12
-    python3 scripts/check_shadow_graph.py --duration 6 --expect-unhealthy --expect-zero || RC=$?
+    run_fake --duration 60 --send-goal --stop-tf-after 12
+    stop_check 11 30
     ;;
   stale_stamp)
-    run_fake --duration 60 --repeat-old-stamp
-    sleep 6
-    python3 scripts/check_shadow_graph.py --duration 8 --expect-unhealthy --expect-zero || RC=$?
+    # 先正常运行产生运动，11 s 后冻结时间戳（旧 stamp 重发）。
+    run_fake --duration 60 --send-goal --freeze-stamp-after 11
+    stop_check 11 30
     ;;
   stamp_backwards)
-    run_fake --duration 60 --stamp-backwards-after 6
-    sleep 10
-    python3 scripts/check_shadow_graph.py --duration 6 --expect-unhealthy --expect-zero || RC=$?
+    run_fake --duration 60 --send-goal --stamp-backwards-after 6
+    stop_check 11 30
     ;;
   localization_jump)
-    run_fake --duration 60 --jump-after 8
-    sleep 12
-    python3 scripts/check_shadow_graph.py --duration 6 --expect-unhealthy --expect-zero || RC=$?
+    run_fake --duration 60 --send-goal --jump-after 12
+    stop_check 11 30
+    ;;
+  recovery_no_resume)
+    # 输入失效 -> 停车 -> 输入恢复：健康恢复但旧任务不得复活。
+    run_fake --duration 60 --send-goal --stop-cloud-after 12 --resume-cloud-after 20
+    stop_check 11 34 --expect-healthy-after 22
     ;;
   pairing_mismatch)
     run_fake --duration 40 --mismatch-pairing
@@ -158,9 +204,8 @@ case "${SCENARIO}" in
     fi
     ;;
   cancel)
-    run_fake --duration 60 --send-goal --cancel-after 14
-    sleep 20
-    python3 scripts/check_shadow_graph.py --duration 6 --expect-healthy --expect-zero || RC=$?
+    run_fake --duration 60 --send-goal --cancel-after 12
+    stop_check 11 30 --expect-healthy-after 15
     ;;
   *)
     echo "未知场景: ${SCENARIO}" >&2

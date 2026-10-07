@@ -11,7 +11,8 @@
      closed_loop_controller）；
   2. 禁止节点不存在（map_pub / pcl_render_node / go2_kinematic_sim /
      open_loop_controller / go2_gait_publisher / uart_node）；
-  3. `/cmd_vel`、`/cmd_vel_remap`、`/sentry_scan/cmd_vel` **没有任何发布者**；
+  3. `/cmd_vel`、`/cmd_vel_remap`、`/sentry_scan/cmd_vel` **没有被影子命名空间内的节点发布**；
+     外部发布者（例如并存的 Nav2）只统计、不判失败；
   4. `health_ok` 与 `cmd_vel_shadow` 的实际取值符合预期；
   5. 影子速度的 yaw 候选恒为 0、linear.z 恒为 0（不透传未定义分量）。
 
@@ -29,7 +30,8 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
 
-REQUIRED_NODES = {"rm_input_adapter", "shadow_guard", "scan_planner_node", "closed_loop_controller"}
+REQUIRED_NODES = {"rm_input_adapter", "task_adapter", "shadow_guard", "scan_planner_node",
+                   "closed_loop_controller"}
 FORBIDDEN_NODES = {"map_pub", "pcl_render_node", "go2_kinematic_sim", "go2_gait_publisher",
                    "open_loop_controller", "uart_node"}
 FORBIDDEN_TOPICS = ("/cmd_vel", "/cmd_vel_remap", "/sentry_scan/cmd_vel")
@@ -63,6 +65,7 @@ class ShadowGraphChecker(Node):
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--duration", type=float, default=6.0)
+    parser.add_argument("--shadow-namespace", default="/sentry_scan")
     parser.add_argument("--expect-healthy", action="store_true")
     parser.add_argument("--expect-unhealthy", action="store_true")
     parser.add_argument("--expect-motion", action="store_true",
@@ -86,14 +89,24 @@ def main(argv=None) -> None:
     if present_forbidden:
         failures.append("forbidden nodes running in shadow: %s" % sorted(present_forbidden))
 
+    own_ns = args.shadow_namespace.rstrip("/") or "/"
+    external = 0
     for topic in FORBIDDEN_TOPICS:
         try:
             infos = node.get_publishers_info_by_topic(topic)
         except Exception as exc:
             failures.append("graph query failed for %s: %s" % (topic, exc))
             continue
-        if infos:
-            failures.append("%s has %d publisher(s)" % (topic, len(infos)))
+        for info in infos:
+            namespace = (info.node_namespace or "/").rstrip("/") or "/"
+            if namespace == own_ns:
+                failures.append("%s is published by shadow node %s%s"
+                                % (topic, namespace, info.node_name))
+            else:
+                external += 1
+    if external:
+        print("external publisher(s) on %s: %d (coexistence, not a failure)"
+              % ("/".join(FORBIDDEN_TOPICS), external))
 
     if node.health is None:
         failures.append("health_ok was never received (adapter/silent latch broken)")

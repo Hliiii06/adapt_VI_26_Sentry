@@ -478,7 +478,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /sentry_scan/move_base_simple/goal
+        Value: /sentry_scan/task/goal_in
     - Class: rviz_default_plugins/PublishPoint
       Single click: true
       Topic:

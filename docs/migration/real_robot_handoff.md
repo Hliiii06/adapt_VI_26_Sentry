@@ -4,6 +4,8 @@
 
 > 实现与证据：[影子输入契约](../interfaces/shadow_input_contract.md)、
 > [影子验收证据](../testing/shadow_acceptance.md)、`src/sentry_scan_adapter/`。
+> 审查（对照 `54a1b1d`–`c1a2440`）提出的 5 项已修正：目标/路线坐标适配、点云有效性与
+> 地图更新门控、与 Nav2 并存的保护层语义、先动后停的停车判据、未来时间戳拒绝。
 > 本页以下内容是任务要求与边界，仍然是评审依据；其中"未实现 adapter"等表述指当时状态。用户已决定暂停扩建仿真、恢复 C 方案实车替换工作。
 本轮 Codex 交付实现计划，未实现以下 adapter，未授权启动硬件或向底盘输出。
 具体包名、frame 与新增接口是 **PROPOSED**；C 方向及推进实车接入是用户已确认的目标。

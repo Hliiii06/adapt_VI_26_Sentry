@@ -11,8 +11,12 @@ import unittest
 
 import rclpy
 from geometry_msgs.msg import TransformStamped
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
+from std_msgs.msg import Header
 
-from sentry_scan_adapter.rm_input_adapter import RmInputAdapter, _pose_from_transform, _rotate
+from sentry_scan_adapter.rm_input_adapter import (RmInputAdapter, _count_finite_points,
+                                                  _pose_from_transform, _rotate)
 
 
 def _tf(translation=(0.0, 0.0, 0.0), yaw=0.0):
@@ -133,6 +137,49 @@ class AdapterMathTest(unittest.TestCase):
         self.assertFalse(self.node._accept_stamp(channel, self.now - 0.2, self.now),
                          "timestamp going backwards must be rejected")
         self.assertIn("backwards", channel.error)
+
+    def test_future_stamp_rejected_without_polluting_history(self):
+        channel = self.node.channels["odom"]
+        channel.error = ""
+        channel.last_stamp = self.now - 0.1
+        # 1 小时之后的坏 stamp：必须拒绝，且不得写入 last_stamp。
+        self.assertFalse(self.node._accept_stamp(channel, self.now + 3600.0, self.now),
+                         "a stamp far in the future must be rejected")
+        self.assertIn("future", channel.error)
+        self.assertAlmostEqual(channel.last_stamp, self.now - 0.1, places=6,
+                               msg="rejected future stamp must not become history")
+        # 之后正常（略早于当前）的时间戳仍应被接受，证明历史没有被污染。
+        channel.error = ""
+        self.assertTrue(self.node._accept_stamp(channel, self.now - 0.05, self.now),
+                        "a normal stamp after a rejected future stamp must still be accepted")
+        # 容差内的小幅超前允许（同一回调里 TF/消息时间戳的常见抖动）。
+        channel.error = ""
+        self.assertTrue(self.node._accept_stamp(channel, self.now + 0.01, self.now))
+
+    def test_cloud_validity_check(self):
+        header = Header()
+        header.frame_id = "camera_init"
+        good = create_cloud_xyz32(header, [(0.0, 0.0, 0.1), (1.0, 2.0, 0.3)])
+        count, why = _count_finite_points(good)
+        self.assertEqual((count, why), (2, ""))
+
+        nan = create_cloud_xyz32(header, [(float("nan"), float("nan"), float("nan"))] * 50)
+        count_nan, why_nan = _count_finite_points(nan)
+        self.assertEqual(count_nan, 0, "an all-NaN cloud has zero finite points")
+        self.assertEqual(why_nan, "")
+
+        partial = create_cloud_xyz32(header, [(float("nan"),) * 3, (1.0, 1.0, 1.0)] * 20)
+        count_partial, _ = _count_finite_points(partial)
+        self.assertEqual(count_partial, 20)
+
+        broken = PointCloud2()
+        broken.header.frame_id = "camera_init"
+        broken.width, broken.height, broken.point_step, broken.row_step = 10, 1, 8, 80
+        broken.fields = good.fields
+        broken.data = b"\x00" * 80
+        count_broken, why_broken = _count_finite_points(broken)
+        self.assertEqual(count_broken, 0)
+        self.assertIn("point_step", why_broken)
 
     def test_pose_from_transform(self):
         pose = _pose_from_transform(_tf(translation=(1.0, 2.0, 3.0), yaw=math.pi / 2).transform)

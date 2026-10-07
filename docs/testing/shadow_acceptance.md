@@ -30,35 +30,60 @@ done
 
 最近一次完整记录：`log/shadow/final_matrix.log` 的 14 个场景**全部通过**（2026-10-07 17:02–17:08），`replay_guard` 单独执行通过，合计 **15/15**。
 
-## 二、场景矩阵（合成输入）
+## 二、场景矩阵（合成输入，20 个场景）
 
 | 场景 | 目的（对应交接 B3 测试） | 判据 | 结果 |
 |---|---|---|---|
-| `adapter_math` | frame/杆臂/速度样例：yaw=90° 旋转、杆臂补偿、缺 TF 降级、时间门控 | 9 个单测全过 | **PASS** |
-| `replay_guard` | 回放安全：非隔离 domain 或缺少 `/clock` 时必须拒绝启动 | launch 拒绝并给出原因 | **PASS** |
-| `no_inputs` | 启动隔离 + 失效关闭 | 4 个必需节点在跑；无 `/cmd_vel`、`/cmd_vel_remap`、`/sentry_scan/cmd_vel` 发布者；无 `map_pub`/`pcl_render_node`/`go2_kinematic_sim`/`open_loop_controller`/UART 节点；`health_ok=false`；`cmd_vel_shadow` 全零 | **PASS** |
-| `healthy_static` | 时间/QoS：真实端点可连接、云与射线原点配对 | `body_pose` 50 Hz、`cloud`/`sensor_pose` 10 Hz、帧均为 `odom`、配对偏差 ≤ 0.02 s；无任务时影子输出为零 | **PASS** |
-| `mode1_goal` | 三模式：Mode 1 RViz 目标 | 健康 + 候选速度流过门控（max abs(vxy)=1.00 m/s），`wz=0`、`vz=0` | **PASS** |
-| `mode2_waypoints` | 三模式：Mode 2 参数航点 | 健康 + 候选速度（max abs(vxy)=1.00 m/s） | **PASS** |
-| `mode3_path` | 三模式：Mode 3 参考路线 | 健康 + 候选速度（max abs(vxy)=1.00 m/s） | **PASS** |
-| `cloud_stop` | 输入失效：云中断 | 进入不健康、影子输出为零、发布 `planning/reset` | **PASS** |
-| `odom_stop` | 输入失效：odom/TF 停发 | 同上 | **PASS** |
+| `adapter_math` | frame/杆臂/速度样例 + 未来/倒退时间戳 + 点云有效点 | 11 个单测全过 | **PASS** |
+| `replay_guard` | 回放安全：非隔离 domain 或缺少 `/clock` 必须拒绝 | launch 拒绝并给出原因 | **PASS** |
+| `no_inputs` | 启动隔离 + 失效关闭 | 必需节点（含 `task_adapter`）在跑；影子命名空间内无禁止话题发布者；无仿真/UART 节点；`health_ok=false`；输出全零 | **PASS** |
+| `healthy_static` | 时间/QoS：端点可连接、云与射线原点配对 | 帧均为 `odom`、配对 ≤0.02 s、无任务时输出为零 | **PASS** |
+| `mode1_goal` | 三模式：Mode 1 目标（经 `task_adapter`） | 健康 + 候选速度 max abs(vxy)=1.00 m/s，`wz=vz=0` | **PASS** |
+| `mode2_waypoints` | 三模式：Mode 2 参数航点 | 健康 + 候选速度 | **PASS** |
+| `mode3_path` | 三模式：Mode 3 参考路线 | 健康 + 候选速度 | **PASS** |
+| `task_frame_transform` | **坐标转换（审查 P1）**：非单位 `map→odom`、目标与路线在 `map` 下 | 输出 frame=`odom` 且数值等于 `T_odom<-map·p`；未知/空 frame 触发明确拒绝日志且无输出 | **PASS** |
+| `nav2_coexist` | **与旧导航并存（审查 P2）**：外部 `controller_server` 发布 `/cmd_vel` | 外部发布者只统计；影子仍放行候选速度（max abs(vxy)=1.00） | **PASS** |
+| `cloud_stop` | 输入失效：云中断 | 事件前有运动 → 限时归零 → 整窗为零 | **PASS** |
+| `invalid_cloud` | **无效点云（审查 P1）**：持续注入全 NaN 云 | 适配层按有效点拒绝（日志 `finite xyz`）→ 停车 | **PASS** |
+| `map_gate` | **地图未更新门控（审查 P1）**：心跳来源切断，适配器仍健康 | 事件前有运动 → 心跳停后归零（`--expect-healthy-after` 断言此时 `health_ok=true`） | **PASS** |
+| `odom_stop` | 输入失效：odom/TF 停发 | 运动 → 限时归零 → 整窗为零 | **PASS** |
 | `tf_stop` | 输入失效：仅动态 TF 停发 | 同上 | **PASS** |
-| `stale_stamp` | 时间：旧 stamp 连续重发 | 来源年龄门控生效，进入不健康、输出为零 | **PASS** |
-| `stamp_backwards` | 时间：时间戳倒退 | 倒退帧被拒并保持不健康 | **PASS** |
-| `localization_jump` | 重定位：map→odom 跳变 1.0 m | 判为跳变、锁止到整组重启、输出为零 | **PASS** |
-| `pairing_mismatch` | 时间/配对：sensor_pose 与 cloud 差 0.30 s | GridMap 打印 `strict pairing ... cloud rejected`（本轮 11 次） | **PASS** |
-| `cancel` | 任务时序：取消后不重新运动 | 取消后 6 s 观察窗内影子输出全零，输入保持健康 | **PASS** |
+| `stale_stamp` | 时间：旧 stamp 连续重发（先正常运行再冻结） | 同上 | **PASS** |
+| `stamp_backwards` | 时间：时间戳倒退 | 同上 | **PASS** |
+| `localization_jump` | 重定位：map→odom 跳变 1.0 m | 同上 | **PASS** |
+| `recovery_no_resume` | 任务时序：失效→停车→**输入恢复** | 恢复后 `health_ok=true` 但输出仍全程为零（旧任务不复活） | **PASS** |
+| `pairing_mismatch` | 时间/配对：sensor_pose 与 cloud 差 0.30 s | GridMap 打印 `strict pairing ... cloud rejected` | **PASS** |
+| `cancel` | 任务时序：取消 | 事件前有运动、限时归零、整窗为零、健康保持为真 | **PASS** |
 
-### 关键实测数值（本轮日志）
+停车类场景统一由 `scripts/check_shadow_stop.py` 判定：**事件前必须有 ≥0.2 m/s 的候选速度**
+（否则场景无效）、最后一个非零样本必须出现在 `事件时刻 + 3 s` 内、`观察窗`内每个样本都为零、
+采样间隔 ≤0.5 s；可选 `--expect-healthy-after` 断言门控在健康为真时也生效。
 
-- `healthy_static`：`body_pose` 301 条 / 50.0 Hz、`sensor_pose` 与 `cloud` 各 60 条 / 10.0 Hz，
-  接收年龄 ≈ 0.02 s，frame 均为 `odom`，配对检查 PASS。
-- `mode1_goal`：`Received trajectory` 出现、`Task authorization GRANTED (task_id=1)`；
-  影子 201 个采样，max abs(vxy)=1.0000、max abs(wz)=0.0000、max abs(vz)=0.0000。
-- `pairing_mismatch`：`[GridMap] strict pairing: cloud stamp ... vs sensor_pose stamp ... (delta 0.3000s > 0.0200s); cloud rejected`。
-- `adapter_math`：`Ran 9 tests ... OK`（含 yaw=90°、杆臂 `v_center = v_point + ω × R·offset`、
-  未补偿时降级、`velocity_frame_unresolved` 不计入必需 TF 失效、旧 stamp/倒退拒绝）。
+若需重跑完整矩阵：
+
+```bash
+for s in adapter_math replay_guard no_inputs healthy_static mode1_goal mode2_waypoints \
+         mode3_path task_frame_transform nav2_coexist cloud_stop invalid_cloud map_gate \
+         odom_stop tf_stop stale_stamp stamp_backwards localization_jump \
+         recovery_no_resume pairing_mismatch cancel; do
+  bash scripts/test_shadow_entry.sh "$s" || echo "FAILED: $s"
+done
+```
+
+最近一次完整记录：**20/20 全部通过**（`log/shadow/final2_matrix.log`，2026-10-07 17:49–18:00；`log/` 不入库）。
+
+## 二点五、审查修正（对照 54a1b1d–c1a2440）
+
+| 审查项 | 修正 | 证据 |
+|---|---|---|
+| **P1 缺少目标/路线坐标转换** | 新增 `task_adapter`：按消息 stamp 把 `task/goal_in`、`task/path_in` 从任意 frame 转到规划系后发布 `goal`、`initial_path`；空/未知 frame 明确拒绝。FSM 的 `move_base_simple/goal` remap 到 `goal`，Mode 3 发布器 remap 到 `task/path_in` | `task_frame_transform`：非单位 `map→odom`（dx=1, dy=1, yaw=0.3）下 goal `(2,1)`→`(0.955,-0.296)`、路线两点转换正确、未知/空 frame 无输出并留拒绝日志 |
+| **P1 健康不代表地图有效更新** | 适配层按结构+有限值校验点云（`min_valid_points`，默认 10）；GridMap 只在"配对通过+非空+有有效点"时发布 `grid_map/cloud_update` 心跳；`shadow_guard` 以 `max_map_age` 门控 | `invalid_cloud`（全 NaN 云被拒、日志 `finite xyz`、停车）与 `map_gate`（心跳切断后归零，且断言此时 `health_ok=true`）；单测含全 NaN/结构不一致云 |
+| **P2 保护层阻断与 Nav2 并行观察** | guard 只把**影子命名空间内**节点发布的 `/cmd_vel`、`/cmd_vel_remap` 判为违规；外部发布者只统计并记录 | `nav2_coexist`：外部 `controller_server` 发布 `/cmd_vel` 时，影子仍放行候选速度 |
+| **P2 失效停车可能"本来没动"** | 新增 `check_shadow_stop.py`：事件前必须有运动、限时归零、整窗为零、采样连续；失效场景一律先发目标 | `cloud_stop`/`invalid_cloud`/`map_gate`/`odom_stop`/`tf_stop`/`stale_stamp`/`stamp_backwards`/`localization_jump`/`cancel` 全部先产生 1.00 m/s 候选速度再判停车 |
+| **P2 未来时间戳被接受并污染历史** | `max_future_stamp`（默认 0.05 s）：超限拒绝且**不更新** `last_stamp`；追加单测 | `adapter_math` 新增用例：+3600 s 被拒、历史不变、随后正常 stamp 仍被接受 |
+
+修正后既有结论不变：影子入口仍**没有**下发 `/cmd_vel` 的开关，所有场景仍断言
+影子命名空间内不存在 `/cmd_vel`/`/cmd_vel_remap` 发布者。
 
 ## 三、本轮新增的 SCAN 改动与回归
 
@@ -68,6 +93,8 @@ done
 | `closed_loop_controller.yaw_candidate_enabled` | **默认 true**，仿真行为不变；影子置 false 只把 `angular.z` 置零 | 同上（日志确认 `yaw_candidate_enabled=true`） |
 | `PlanningVisualization.visualization_frame_id` | **默认空** = 上游 world/map 硬编码，仿真显示不变 | 编译与上述场景通过；RViz 图形交互本环境无法验证 |
 | FSM Mode 2 自动起步等待首帧云（`GridMap::hasCloudData()`） | 只影响 `navi_mode=2` 的起步时机 | 仿真 `mode2_waypoints` 通过 |
+| GridMap 发布 `grid_map/cloud_update` 心跳（接受云时） | 新增只读话题；订阅/参数默认值不变；空云不再算作一次更新 | 仿真回归通过（见下） |
+| `task_adapter` 新节点 | 影子入口专用；仿真链不含它 | 影子 `task_frame_transform` 通过 |
 
 仿真的定向回归命令与结果：
 
@@ -82,11 +109,13 @@ bash scripts/scenario.sh cancel_race     # 通过
 | 交接 B3 要求 | 覆盖情况 |
 |---|---|
 | 启动隔离 | `no_inputs`：无模拟 odom/雷达/Go2/UART 节点，且禁止话题无发布者 |
-| frame/杆臂/速度样例 | `adapter_math`：yaw=90° 旋转、杆臂 `v_center = v_point + ω × R·offset`、缺 TF 降级 |
+| frame/杆臂/速度样例 | `adapter_math`：yaw=90° 旋转、杆臂 `v_center = v_point + ω × R·offset`、缺 TF 降级、未来/倒退时间戳、点云有效点 |
+| 任务坐标转换 | `task_frame_transform`：非单位 `map→odom` 的目标与路线转换 + 未知/空 frame 拒绝 |
 | 时间/QoS | `healthy_static`（端点可连接、频率、配对）+ `stale_stamp` + `stamp_backwards` |
 | 三模式 | `mode1_goal` / `mode2_waypoints` / `mode3_path` |
-| 输入失效 | `cloud_stop` / `odom_stop` / `tf_stop` / `localization_jump` |
-| 任务时序 | `cancel`；**延迟旧授权/旧轨迹**由既有仿真 `cancel_race` 覆盖（同一 `TaskAuthorization` + `planning/reset` 实现），影子矩阵未重复 |
+| 输入失效 | `cloud_stop` / `invalid_cloud` / `map_gate` / `odom_stop` / `tf_stop` / `localization_jump`（全部经 `check_shadow_stop.py` 证明"先动后停"） |
+| 与旧导航并存 | `nav2_coexist`：外部 `/cmd_vel` 发布者不阻断影子 |
+| 任务时序 | `cancel`（先动后停）+ `recovery_no_resume`（恢复输入后旧任务不复活）；**延迟旧授权/旧轨迹**由既有仿真 `cancel_race` 覆盖（同一实现），影子矩阵未重复 |
 | 重定位 | `localization_jump` |
 | 碰撞/高度 | 影子 launch 使用真实尺寸参数（R=0.26/H=0.25、单圆柱包络）；**碰撞逻辑本身不在影子矩阵重跑**，仍以受控仿真场景（`gap_edge`/`low_obstacle`/`terrain_tunnel_low`）为证据。真实洞净高与实车最低包络 UNKNOWN |
 | 回放安全 | `replay_guard`（非隔离 domain / 无 `/clock` 必须拒绝）+ 契约第七节步骤 |
@@ -97,6 +126,7 @@ bash scripts/scenario.sh cancel_race     # 通过
    `world` 与 `odom` 的数值关系、`/LIVO2/imu_propagate` 的角速度与 IMU 杆臂均 **UNKNOWN**，
    因此速度前馈当前按"降级为零"处理（见契约第四节）。
 2. **`body_frame=base_link` 是否等于几何中心/旋转轴**：UNKNOWN，需要用户用实车尺寸/照片核对。
+   另外地图心跳按云的 stamp 计时，I1 必须确认真实云的 stamp 与本机时钟同尺度。
 3. **Mode 2 多航点顺序完成**：合成输入里"机器人"不动（fake 不推进位姿），因此只验证了
    起步、规划与候选速度流通，**没有**验证逐点到达与切换。真实录包回放才能覆盖。
 4. **RViz 图形交互**：本环境创建不了 OpenGL 上下文，未验证影子 RViz 配置的实际显示。

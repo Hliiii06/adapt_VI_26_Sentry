@@ -17,6 +17,7 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/image_encodings.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/header.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -274,6 +275,9 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_inf_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr sliding_map_bbox_pub_;
+  // 每接受一帧经过配对检查的点云就发布其 header：供影子保护层判断"规划地图是否真的在更新"。
+  // 拒绝的云不发布，因此该话题静默 == 地图没有新数据。
+  rclcpp::Publisher<std_msgs::msg::Header>::SharedPtr cloud_update_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr unknown_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr depth_cloud_pub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr extrinsic_pose_pub_;
