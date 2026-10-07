@@ -44,6 +44,10 @@ class ShadowGraphChecker(Node):
         self.last_health_recv = None
         self.shadow_samples = []
         self.shadow_count = 0
+        # DDS 发现是异步的：单次 get_node_names()/get_publishers_info_by_topic() 可能少看到
+        # 已经存活的节点/发布者。整个观察窗内取并集，避免把"发现延迟"误判成"节点不在"。
+        self.seen_nodes = set()
+        self.seen_publishers = {}
         latch = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
                            reliability=ReliabilityPolicy.RELIABLE,
                            durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -79,9 +83,17 @@ def main(argv=None) -> None:
     end = time.time() + args.duration
     while time.time() < end and rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.1)
+        node.seen_nodes |= set(node.get_node_names())
+        for topic in FORBIDDEN_TOPICS:
+            try:
+                for info in node.get_publishers_info_by_topic(topic):
+                    namespace = (info.node_namespace or "/").rstrip("/") or "/"
+                    node.seen_publishers[(topic, namespace, info.node_name)] = True
+            except Exception:
+                pass
 
     failures = []
-    names = {n.split("/")[-1] for n in node.get_node_names()}
+    names = {n.split("/")[-1] for n in node.seen_nodes}
     missing = REQUIRED_NODES - names
     if missing:
         failures.append("missing required nodes: %s" % sorted(missing))
@@ -91,19 +103,11 @@ def main(argv=None) -> None:
 
     own_ns = args.shadow_namespace.rstrip("/") or "/"
     external = 0
-    for topic in FORBIDDEN_TOPICS:
-        try:
-            infos = node.get_publishers_info_by_topic(topic)
-        except Exception as exc:
-            failures.append("graph query failed for %s: %s" % (topic, exc))
-            continue
-        for info in infos:
-            namespace = (info.node_namespace or "/").rstrip("/") or "/"
-            if namespace == own_ns:
-                failures.append("%s is published by shadow node %s%s"
-                                % (topic, namespace, info.node_name))
-            else:
-                external += 1
+    for (topic, namespace, node_name) in sorted(node.seen_publishers):
+        if namespace == own_ns:
+            failures.append("%s is published by shadow node %s%s" % (topic, namespace, node_name))
+        else:
+            external += 1
     if external:
         print("external publisher(s) on %s: %d (coexistence, not a failure)"
               % ("/".join(FORBIDDEN_TOPICS), external))

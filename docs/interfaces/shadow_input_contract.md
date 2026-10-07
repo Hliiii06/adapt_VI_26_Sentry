@@ -112,8 +112,12 @@ z 膨胀 = `robot_height/2`（默认 0.125）。
 - 时间戳不得倒退（`max_stamp_regression=0`）；有限值/四元数模长检查；空云拒绝；
 - **有效点检查（按消息布局解析）**：只接受 `is_bigendian=false`、x/y/z 字段为 `FLOAT32` 的布局；
   校验 `row_step ≥ width·point_step`、`len(data) ≥ height·row_step`、字段偏移在 `point_step` 内；
-  **行填充按每行起始地址寻址**；其他格式（大端、FLOAT64 等）**显式拒绝**而不是误读；
-  至少有 `min_valid_points`（默认 10）个有限 xyz 点，全 NaN 云按无效输入拒绝；
+  其他格式（大端、FLOAT64 等）**显式拒绝**而不是误读；至少有 `min_valid_points`（默认 10）个
+  有限 xyz 点，全 NaN 云按无效输入拒绝；
+- **行填充先重排再变换**：`row_step > width·point_step` 的云会先按**每行起始地址**重排为密集布局，
+  再交给 TF 变换。原因：本环境安装的 `tf2_sensor_msgs.do_transform_cloud()` 按连续 `point_step`
+  遍历 `width*height` 个点，读端若沿用输入布局就会把填充字节当成点、并丢掉真实点。
+  适配层不接受这种不确定性：检查、重排、变换、输出都有单测覆盖（含填充区写 90 的样例）。
 - TF 必须存在（`require_tf=true`），否则该帧拒绝；
 - `map→odom` 平移 > 0.5 m 或旋转 > 0.35 rad 判为**定位跳变**，默认**锁止到整组重启**
   （`jump_latch_duration=0`）。
@@ -126,6 +130,10 @@ z 膨胀 = `robot_height/2`（默认 0.125）。
 2. 发布 `planning/reset` 撤销任务并**锁止**输出（`map_latched`，按 `revoke_repeat_period` 重复撤权）；
 3. 只有出现**编号更大的新任务授权**（`planning/task_active`，`task_id > latched_task_id`）
    **且**地图已恢复时，才解除锁止。
+
+**没有关闭开关**：地图过期**始终**输出零并撤销+锁止。曾经用 `revoke_on_map_stale` 同时控制
+"是否撤销"和"是否允许继续输出"，关掉它会连"过期地图仍放行 0.4 m/s"一起放开（复审反例），
+因此该参数已被删除。
 
 因此心跳恢复本身不会重新放行旧速度——必须有新任务。启动阶段（从未收到过心跳）只归零、不锁止，
 因为此时也不存在任务。**I1 必须核对**：心跳按云的 `header.stamp` 计时，真实云的 stamp

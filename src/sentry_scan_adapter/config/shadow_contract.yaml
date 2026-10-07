@@ -72,7 +72,7 @@
     max_wz: 1.5
     zero_yaw_candidate: true      # 影子阶段不透传 yaw 候选，MCU 保留朝向所有权
     cloud_update_topic: grid_map/cloud_update  # 规划地图"真的接受了新点云"的心跳
-    max_map_age: 0.5              # 心跳超过该时间即门控为零（健康为真但地图不更新也要停）
+    max_map_age: 0.5              # 心跳超过该时间：始终输出零 + 撤销任务并锁止，直到新任务
     output_rate: 20.0
     record: true
     log_dir: log/shadow

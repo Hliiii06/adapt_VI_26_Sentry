@@ -30,11 +30,12 @@ done
 
 最近一次完整记录：`log/shadow/final_matrix.log` 的 14 个场景**全部通过**（2026-10-07 17:02–17:08），`replay_guard` 单独执行通过，合计 **15/15**。
 
-## 二、场景矩阵（合成输入，22 个场景）
+## 二、场景矩阵（合成输入，24 个场景）
 
 | 场景 | 目的（对应交接 B3 测试） | 判据 | 结果 |
 |---|---|---|---|
-| `adapter_math` | frame/杆臂/速度样例 + 未来/倒退时间戳 + 点云有效点 | 11 个单测全过 | **PASS** |
+| `adapter_math` | frame/杆臂/速度样例 + 未来/倒退时间戳 + 点云布局 | 13 个单测全过 | **PASS** |
+| `guard_logic` | 影子门控逻辑：过期地图必须始终停车、锁止需新任务解除、无关闭开关 | 6 个单测全过 | **PASS** |
 | `replay_guard` | 回放安全：非隔离 domain 或缺少 `/clock` 必须拒绝 | launch 拒绝并给出原因 | **PASS** |
 | `no_inputs` | 启动隔离 + 失效关闭 | 必需节点（含 `task_adapter`）在跑；影子命名空间内无禁止话题发布者；无仿真/UART 节点；`health_ok=false`；输出全零 | **PASS** |
 | `healthy_static` | 时间/QoS：端点可连接、云与射线原点配对 | 帧均为 `odom`、配对 ≤0.02 s、无任务时输出为零 | **PASS** |
@@ -42,6 +43,7 @@ done
 | `mode2_waypoints` | 三模式：Mode 2 参数航点 | 健康 + 候选速度 | **PASS** |
 | `mode3_path` | 三模式：Mode 3 参考路线 | 健康 + 候选速度 | **PASS** |
 | `task_frame_transform` | **坐标转换（审查 P1）**：非单位 `map→odom`、目标与路线在 `map` 下 | 输出 frame=`odom` 且数值等于 `T_odom<-map·p`；未知/空 frame 触发明确拒绝日志且无输出 | **PASS** |
+| `padded_cloud` | **行填充点云（三轮复审 P2）**：填充区写 (90,90,90) | 适配层日志 `repacked to a dense layout`；全链健康且候选速度流通 | **PASS** |
 | `nav2_coexist` | **与旧导航并存（审查 P2）**：外部 `controller_server` 发布 `/cmd_vel` | 外部发布者只统计；影子仍放行候选速度（max abs(vxy)=1.00） | **PASS** |
 | `cloud_stop` | 输入失效：云中断 | 事件前有运动 → 限时归零 → 整窗为零 | **PASS** |
 | `invalid_cloud` | **无效点云（审查 P1）**：持续注入全 NaN 云 | 适配层按有效点拒绝（日志 `finite xyz`）→ 停车 | **PASS** |
@@ -64,15 +66,15 @@ done
 若需重跑完整矩阵：
 
 ```bash
-for s in adapter_math replay_guard no_inputs healthy_static mode1_goal mode2_waypoints \
-         mode3_path task_frame_transform nav2_coexist cloud_stop invalid_cloud map_gate \
-         map_relatch map_relatch_newtask odom_stop tf_stop stale_stamp stamp_backwards \
-         localization_jump recovery_no_resume pairing_mismatch cancel; do
+for s in adapter_math guard_logic replay_guard no_inputs healthy_static mode1_goal \
+         mode2_waypoints mode3_path task_frame_transform padded_cloud nav2_coexist \
+         cloud_stop invalid_cloud map_gate map_relatch map_relatch_newtask odom_stop tf_stop \
+         stale_stamp stamp_backwards localization_jump recovery_no_resume pairing_mismatch cancel; do
   bash scripts/test_shadow_entry.sh "$s" || echo "FAILED: $s"
 done
 ```
 
-最近一次完整记录：**22/22 全部通过**（`log/shadow/final3_matrix.log`，2026-10-07 19:13–19:25；`log/` 不入库）。
+最近一次完整记录：**24/24 全部通过**（`log/shadow/final6_matrix.log`，2026-10-07 20:09–20:27；`log/` 不入库）。
 
 ## 二点五、审查修正（对照 54a1b1d–c1a2440）
 
@@ -110,6 +112,16 @@ done
 | **P1 地图恢复后自动放行旧任务** | 地图心跳停更不再只临时归零：`shadow_guard` 记录 `latched_task_id`、发布 `planning/reset` 并锁止（`map_latched`），只有**编号更大的新任务授权**且地图已恢复才解除 | `map_gate`（停更即撤销+锁止）、`map_relatch`（心跳 20 s 恢复但无新任务 → 到窗末持续为零、无 `map latch cleared`）、`map_relatch_newtask`（24 s 新目标 → 零窗到 23 s、26 s 后恢复运动，实测停更延迟 0.399 s） |
 | **P2 停车判据可在观察窗缺失时假通过** | 判据增加：首帧须在启动后 1 s 内、末帧须覆盖到 `--zero-until`、所有样本有限、按真实事件时刻计时 | 注入方在真正注入时发布 `/sentry_scan/test/fault_marker`；判据优先用该标记的本机接收时刻（输出里打印 `fault=... (marker(...))`），`--fault-at` 仅作回退；`map_relatch` 实测 `fault=11.04s (marker)` |
 | **P2 点云未按 PointCloud2 布局解析** | 只接受 `is_bigendian=false` + x/y/z 为 `FLOAT32`；校验 `row_step`/`data` 长度与字段偏移；行填充按每行起始地址寻址；其他布局**显式拒绝** | `adapter_math` 新增用例：行填充全 NaN → 0 有效点（此前误报 1）、大端被拒并给出 `is_bigendian` 原因、FLOAT64 被拒、截断被拒、行填充有效云计数正确 |
+
+## 二点七、第三轮复审修正（对照 1786c60）
+
+| 复审项 | 修正 | 证据 |
+|---|---|---|
+| **P2 变换链仍会误读行填充** | 适配层在有效性检查之后、TF 变换之前，把 `row_step > width·point_step` 的云按**每行起始地址**重排为密集布局（`_densify_cloud`）；填充区不再进入变换链 | `adapter_math` 新用例：2 行 10 个真实点 + 填充写 90 → 检查 10 点、重排后逐点一致、恒等变换后输出仍 10 点且不含 90；`padded_cloud` 场景走完整链路（日志 `repacked to a dense layout`，健康+运动） |
+| **P2 关闭撤销会连地图过期停车一起关闭** | 删除 `revoke_on_map_stale`：地图过期**始终**输出零，撤销+锁止也**始终**执行；不再存在"允许过期地图继续输出"的配置 | `guard_logic` 单测：过期地图 + 健康输入 + 候选 0.4 m/s → 必须为零且 `map_latched`；锁止在心跳恢复后仍保持、新任务（`task_id` 更大）才解除；断言该参数不再被声明 |
+| 说明 | 本环境实测 `do_transform_cloud()` 会把填充输入重排为密集 12 字节 xyz 输出，因此"误读"取决于读端是否沿用输入布局；适配层通过先重排消除这层不确定性 | 复现命令与输出见本轮汇报；适配层行为由 `adapter_math` + `padded_cloud` 固定 |
+| 测试稳定性（非产品问题） | 合成注入器改为：等订阅端匹配**且**启动满 `--goal-delay`（默认 4 s）后再发目标；判据脚本在整个观察窗内**累积** ROS 图发现结果（DDS 发现是异步的，单次查询会漏看已存在的节点/发布者）；矩阵场景之间加 3 s 间隔 | `padded_cloud`/`mode1_goal`/`mode2_waypoints` 复跑通过；`map_gate`/`map_relatch`/`map_relatch_newtask` 各连续 2 次通过 |
+| 锁止前提细化 | 锁止只在**已有已授权任务**时触发（`task_active`）：启动阶段地图过期只需输出零，不该锁止，否则第一个任务授权会被误当成"解锁"并在日志里产生无意义的 latch/clear | `guard_logic` 新增用例（无任务时过期 → 零且不锁止），共 7 项 |
 
 ## 三、本轮新增的 SCAN 改动与回归
 

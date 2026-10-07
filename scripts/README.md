@@ -48,13 +48,14 @@
 
 | 脚本 | 用途 |
 |---|---|
-| `test_shadow_entry.sh` | 影子场景编排与判据入口（22 个场景；失败返回非零） |
+| `test_shadow_entry.sh` | 影子场景编排与判据入口（24 个场景；失败返回非零） |
 | `check_shadow_graph.py` | ROS 图与门控判据：影子命名空间内无禁止话题发布者、必需节点存在、输出全零/运动；**允许外部 Nav2 发布 `/cmd_vel`** |
 | `check_shadow_stop.py` | 失效/取消判据：事件前必须有运动、限时归零、整窗为零、采样首尾覆盖+有限值、按 `test/fault_marker` 的实际事件时刻计时、可选健康/新任务断言 |
 | `check_task_adapter.py` | 任务坐标判据：非单位 `map→odom` 下的目标/路线转换数值，以及未知/空 frame 拒绝 |
 | `fake_rm_inputs.py` | 合成 RM 输入与故障注入（NaN 云、云停/恢复、时间戳倒退/旧 stamp、定位跳变、map→odom 非单位偏移、心跳停/恢复、第二个目标）；注入时发布 `test/fault_marker`；**不发布速度命令** |
 | `spoof_nav2_cmdvel.py` | 测试替身：外部 `controller_server` 在 `/cmd_vel` 发布零速，验证"与 Nav2 并存"不被误判 |
-| `test_shadow_adapter_math.py` | 坐标/杆臂/yaw=90°/未来与倒退时间戳/点云布局（行填充、大端、FLOAT64、截断）的确定性单测（无需 ROS 图） |
+| `test_shadow_adapter_math.py` | 坐标/杆臂/yaw=90°/未来与倒退时间戳/点云布局（行填充经检查+重排+变换+输出、大端、FLOAT64、截断）的确定性单测（无需 ROS 图） |
+| `test_shadow_guard_logic.py` | 影子门控逻辑单测：过期地图必须始终停车、锁止只能由新任务解除、无关闭开关（无需 ROS 图） |
 
 启动入口为 `ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py`（`start_rviz:=false` 可无界面）。
 契约与回放步骤见 [影子输入契约](../docs/interfaces/shadow_input_contract.md)。

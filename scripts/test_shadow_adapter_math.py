@@ -16,13 +16,33 @@ from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
 from std_msgs.msg import Header
 
+from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
+
 from sentry_scan_adapter.rm_input_adapter import (RmInputAdapter, _count_finite_points,
-                                                  _pose_from_transform, _rotate)
+                                                  _densify_cloud, _pose_from_transform, _rotate)
 
 
 def _xyz_fields(offsets=(0, 4, 8), datatype=PointField.FLOAT32):
     return [PointField(name=name, offset=off, datatype=datatype, count=1)
             for name, off in zip(("x", "y", "z"), offsets)]
+
+
+def _read_xyz_by_layout(msg):
+    """测试侧独立解析：按行起始地址逐点读取（不依赖任何库的填充处理）。"""
+    out = []
+    for row in range(msg.height):
+        for col in range(msg.width):
+            offset = row * msg.row_step + col * msg.point_step
+            out.append(struct.unpack_from("<fff", msg.data, offset))
+    return out
+
+
+def _identity_tf():
+    tf = TransformStamped()
+    tf.header.frame_id = "camera_init"
+    tf.child_frame_id = "odom"
+    tf.transform.rotation.w = 1.0
+    return tf
 
 
 def _raw_cloud(fields, data, width, height, point_step, row_step, bigendian=False):
@@ -237,6 +257,39 @@ class AdapterMathTest(unittest.TestCase):
         count_short, why_short = _count_finite_points(short)
         self.assertEqual(count_short, 0)
         self.assertTrue(why_short)
+
+    def test_padded_cloud_survives_check_densify_and_transform(self):
+        # 2 行 x 5 个真实点，point_step=16（xyz + 4 字节填充），row_step=88（每行尾部再填充 8 字节）；
+        # 填充区故意写入 (90,90,90)，用来暴露 do_transform_cloud 的填充误读。
+        real = []
+        rows = []
+        for row in range(2):
+            body = b""
+            for col in range(5):
+                point = (row * 100.0 + col, row * 10.0 + col, 1.0 + col)
+                real.append(point)
+                body += struct.pack("<fff", *point) + struct.pack("<f", 90.0)
+            rows.append(body + struct.pack("<ff", 90.0, 90.0))
+        data = b"".join(rows)
+        msg = _raw_cloud(_xyz_fields(), data, width=5, height=2, point_step=16, row_step=88)
+
+        count, why = _count_finite_points(msg)
+        self.assertEqual((count, why), (10, ""), "validity check must count only real points")
+        self.assertEqual(_read_xyz_by_layout(msg), real)
+
+        dense = _densify_cloud(msg)
+        self.assertEqual(dense.row_step, dense.width * dense.point_step,
+                         "densified cloud must have no row padding")
+        self.assertEqual(_read_xyz_by_layout(dense), real,
+                         "densify must preserve every real point and drop padding")
+
+        transformed = do_transform_cloud(dense, _identity_tf())
+        out = _read_xyz_by_layout(transformed)
+        self.assertEqual(len(out), len(real), "identity transform must not add/drop points")
+        self.assertNotIn((90.0, 90.0, 90.0), out, "padding must not appear as a point")
+        for want in real:
+            self.assertTrue(any(all(abs(a - b) < 1e-4 for a, b in zip(want, got))
+                                for got in out), "point %s lost in transform" % (want,))
 
     def test_pose_from_transform(self):
         pose = _pose_from_transform(_tf(translation=(1.0, 2.0, 3.0), yaw=math.pi / 2).transform)

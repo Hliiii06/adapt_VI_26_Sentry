@@ -14,6 +14,8 @@
     --repeat-old-stamp       header.stamp 立刻固定不前进（旧消息重发）
     --freeze-stamp-after N   N 秒后把 header.stamp 固定（先正常运行再模拟旧 stamp 重发）
     --second-goal-after T   T 秒后再发一个目标（用于验证"新任务才恢复"）
+    --padded-cloud           发布带行填充的点云（point_step=16、row_step>width*point_step，
+                             填充区写 (90,90,90)），用于验证适配层会先重排为密集布局
     --fake-map-heartbeat-until / --fake-map-heartbeat-resume
                             测试心跳在 N 秒停、M 秒恢复（验证地图锁止）
     注入故障时会在 /sentry_scan/test/fault_marker 发布一条标记（frame_id=原因），
@@ -35,6 +37,7 @@
 
 import argparse
 import math
+import struct
 import time
 
 import rclpy
@@ -42,7 +45,7 @@ from geometry_msgs.msg import PoseStamped, TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
 from std_msgs.msg import Bool, Header
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
@@ -130,8 +133,9 @@ class FakeRmInputs(Node):
         self.create_timer(0.1, self.on_cloud)
         self.create_timer(0.5, self.on_events)
         if args.send_goal:
-            # 只发一次：重复发目标会在取消后重新授权新任务，使"取消后不动"的判据失真。
-            self.create_timer(2.5, self.send_goal_once)
+            # 只发一次（重复发目标会在取消后重新授权新任务，使"取消后不动"的判据失真），
+            # 但必须等订阅端出现再发：DDS 发现未完成时单次发布会被丢掉，导致场景偶发"无运动"。
+            self.create_timer(0.5, self.send_goal_once)
 
     def mark(self, reason: str) -> None:
         """发布一次故障标记（每种原因只发一次），供判据脚本对齐事件时间。"""
@@ -178,6 +182,36 @@ class FakeRmInputs(Node):
         msg.pose.pose.position.z = 0.1
         msg.pose.pose.orientation.w = 1.0
         self._flood_pub.publish(msg)
+
+    def build_padded_cloud(self, header):
+        """把房间点云重新打包成**带行填充**的 PointCloud2（填充区写 90.0）。
+
+        point_step=16（xyz + 4 字节填充），row_step = width*16 + 8（每行尾部再填 8 字节）。
+        当前环境安装的 do_transform_cloud 会按自身布局重排输出，但**读端若沿用输入布局**
+        就会把 90 当成点；适配层因此先按行首址重排为密集布局再变换。
+        """
+        width = 8
+        height = len(self.cloud_points) // width
+        point_step, pad_tail = 16, 8
+        row_step = width * point_step + pad_tail
+        data = bytearray()
+        for row in range(height):
+            body = bytearray()
+            for col in range(width):
+                x, y, z = self.cloud_points[row * width + col]
+                body += struct.pack("<fff", x, y, z) + struct.pack("<f", 90.0)
+            data += body + struct.pack("<ff", 90.0, 90.0)
+
+        msg = PointCloud2()
+        msg.header = header
+        msg.height, msg.width = height, width
+        msg.fields = [PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1)
+                      for name, offset in (("x", 0), ("y", 4), ("z", 8))]
+        msg.is_bigendian = False
+        msg.point_step, msg.row_step = point_step, row_step
+        msg.data = bytes(data)
+        msg.is_dense = False
+        return msg
 
     @staticmethod
     def build_room_cloud():
@@ -253,7 +287,12 @@ class FakeRmInputs(Node):
         if self.args.nan_cloud_after and elapsed > self.args.nan_cloud_after:
             self.mark("nan_cloud")
             points = [(float("nan"), float("nan"), float("nan"))] * len(self.cloud_points)
-        self.cloud_pub.publish(create_cloud_xyz32(header, points))
+        if self.args.padded_cloud and not (self.args.nan_cloud_after
+                                           and elapsed > self.args.nan_cloud_after):
+            self.mark("padded_cloud")
+            self.cloud_pub.publish(self.build_padded_cloud(header))
+        else:
+            self.cloud_pub.publish(create_cloud_xyz32(header, points))
 
     def on_mismatch_pair(self):
         """故意让 sensor_pose 与 cloud 的时间戳差 0.30 s。"""
@@ -271,9 +310,16 @@ class FakeRmInputs(Node):
         self.mismatch_cloud_pub.publish(create_cloud_xyz32(header, self.cloud_points))
 
     def send_goal_once(self, x=None, y=None, second=False):
+        if not second and self._goal_sent:
+            return
+        if self.elapsed() < self.args.goal_delay:
+            # 太早发目标会撞上"FSM 还没收到第一帧 body_pose"，会被直接忽略
+            # （日志 `Ignore RViz goal before receiving initial body pose`）。
+            return
+        if self.goal_pub.get_subscription_count() == 0:
+            # 订阅端尚未匹配（DDS 发现中）：本次不发，等下一次 timer 重试。
+            return
         if not second:
-            if self._goal_sent:
-                return
             self._goal_sent = True
         msg = PoseStamped()
         # 任务消息用真实当前时间：时间戳故障注入只针对 RM 传感器输入。
@@ -300,7 +346,8 @@ class FakeRmInputs(Node):
             self.jump_offset = (1.0, 0.0, 0.0)
             self.get_logger().warn("fake RM inputs: injected map->odom jump of 1.0 m")
         if (self.args.second_goal_after and t > self.args.second_goal_after
-                and not self._second_goal_sent):
+                and not self._second_goal_sent
+                and self.goal_pub.get_subscription_count() > 0):
             self._second_goal_sent = True
             self.send_goal_once(x=self.args.second_goal_x, y=self.args.second_goal_y, second=True)
         if self.args.cancel_after and t > self.args.cancel_after and not self._cancelled:
@@ -328,9 +375,12 @@ def main(argv=None):
     parser.add_argument("--stop-odom-after", type=float, default=0.0)
     parser.add_argument("--stop-tf-after", type=float, default=0.0)
     parser.add_argument("--mismatch-pairing", action="store_true")
+    parser.add_argument("--padded-cloud", action="store_true")
     parser.add_argument("--resume-cloud-after", type=float, default=0.0)
     parser.add_argument("--nan-cloud-after", type=float, default=0.0)
     parser.add_argument("--flood-stale-sensor-pose-after", type=float, default=0.0)
+    parser.add_argument("--goal-delay", type=float, default=4.0,
+                        help="启动后至少等这么久再发目标（等 FSM 收到第一帧 body_pose）")
     parser.add_argument("--goal-x", type=float, default=2.0)
     parser.add_argument("--goal-y", type=float, default=0.0)
     parser.add_argument("--goal-frame", default="odom")

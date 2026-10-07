@@ -123,6 +123,36 @@ def _count_finite_points(msg) -> tuple:
     return int(valid.sum()), ""
 
 
+def _densify_cloud(msg: PointCloud2) -> PointCloud2:
+    """把带行填充的点云整理成密集布局（`row_step == width * point_step`）。
+
+    为什么必须做：当前环境安装的 `tf2_sensor_msgs.do_transform_cloud()` 会按连续的
+    `point_step` 遍历 `width*height` 个点，遇到行填充时会把填充字节当成点、并丢掉真实点
+    （实测：2 行 10 个真实点 + 填充 (90,90,90) → 输出混入 90 且少一个真实点）。
+    因此任何要经过 `do_transform_cloud` 的云都先按**行起始地址**重排为密集布局。
+
+    已经是密集布局时原样返回（不做多余拷贝）。
+    """
+    if msg.row_step == msg.width * msg.point_step:
+        return msg
+    raw = np.frombuffer(msg.data, dtype=np.uint8)
+    rows = np.arange(msg.height, dtype=np.int64) * msg.row_step
+    cols = np.arange(msg.width, dtype=np.int64) * msg.point_step
+    starts = (rows[:, None] + cols[None, :]).reshape(-1)
+    byte_index = starts[:, None] + np.arange(msg.point_step, dtype=np.int64)[None, :]
+    dense = PointCloud2()
+    dense.header = msg.header
+    dense.height = msg.height
+    dense.width = msg.width
+    dense.fields = msg.fields
+    dense.is_bigendian = msg.is_bigendian
+    dense.point_step = msg.point_step
+    dense.row_step = msg.width * msg.point_step
+    dense.data = raw[byte_index].reshape(-1).tobytes()
+    dense.is_dense = msg.is_dense
+    return dense
+
+
 def _pose_from_transform(transform) -> Pose:
     """TransformStamped.transform (Transform) -> geometry_msgs/Pose。"""
     pose = Pose()
@@ -422,19 +452,26 @@ class RmInputAdapter(Node):
                          % (valid_points, self.min_valid_points,
                             (": " + why) if why else ""))
             return
+        dense = _densify_cloud(msg)
         channel.extra["valid_points"] = str(valid_points)
+        channel.extra["dense_layout"] = str(dense is msg)
+        if dense is not msg:
+            self.get_logger().info(
+                "cloud had row padding (row_step=%d, width*point_step=%d); repacked to a dense "
+                "layout before TF, because do_transform_cloud() misreads padded clouds"
+                % (msg.row_step, msg.width * msg.point_step), throttle_duration_sec=10.0)
 
         source_frame = msg.header.frame_id
         if source_frame == self.planning_frame or (
                 self.cloud_assume_planning_frame and source_frame == ""):
-            transformed = msg
+            transformed = dense
             transformed.header.frame_id = self.planning_frame
         else:
             tf = self._lookup(self.planning_frame, source_frame, stamp_s, allow_future=True)
             if tf is None:
                 return
             try:
-                transformed = do_transform_cloud(msg, tf)
+                transformed = do_transform_cloud(dense, tf)
             except Exception as exc:
                 self._reject(channel, "cloud transform failed: %s" % exc)
                 return

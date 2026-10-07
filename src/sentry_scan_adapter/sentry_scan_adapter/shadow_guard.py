@@ -54,7 +54,8 @@ class ShadowGuard(Node):
         # 地图停更时的任务语义：撤销 + 锁止，直到新任务（task_id 更大）到来。
         self.task_active_topic = self.declare_parameter("task_active_topic",
                                                         "planning/task_active").value
-        self.revoke_on_map_stale = bool(self.declare_parameter("revoke_on_map_stale", True).value)
+        # 地图过期**始终**输出零；撤销+锁止也始终执行（不提供关闭开关：
+        # 曾经用同一个开关控制两件事，关掉撤销会连"过期地图仍可输出"一起放行）。
         self.revoke_repeat_period = float(self.declare_parameter("revoke_repeat_period", 1.0).value)
         self.max_health_age = float(self.declare_parameter("max_health_age", 0.5).value)
         self.max_body_age = float(self.declare_parameter("max_body_age", 0.5).value)
@@ -76,6 +77,9 @@ class ShadowGuard(Node):
         self.map_latched = False
         self.latched_task_id = 0
         self.last_task_id = 0
+        # 当前是否已授权执行。锁止的前提是"有任务可撤销"：启动阶段（还没任务）地图过期
+        # 只需输出零，不必锁止——否则会在第一个任务到来时被误当成"解锁"，造成语义混乱。
+        self.task_active = False
         self._last_revoke = -1.0
         self.external_publishers = 0
         self.candidate = Twist()
@@ -127,17 +131,17 @@ class ShadowGuard(Node):
                     "max_health_age": self.max_health_age,
                     "max_map_age": self.max_map_age,
                     "cloud_update_topic": self.cloud_update_topic,
-                    "revoke_on_map_stale": self.revoke_on_map_stale,
                     "zero_yaw_candidate": self.zero_yaw_candidate,
                     "limits": {"vx": self.max_vx, "vy": self.max_vy, "wz": self.max_wz},
                 }, handle, ensure_ascii=False, indent=2)
 
         self.get_logger().warn(
             "Shadow guard ready: candidate='%s' -> shadow='%s'. This node creates NO publisher on "
-            "%s; it only records/tees the gated candidate. Map heartbeat='%s' (max age %.2fs, "
-            "revoke_on_map_stale=%s); external publishers on those topics are tolerated."
+            "%s; it only records/tees the gated candidate. Map heartbeat='%s' (max age %.2fs; "
+            "stale map always stops and is latched until a new task); external publishers on those "
+            "topics are tolerated."
             % (self.candidate_topic, self.shadow_topic, " or ".join(FORBIDDEN_TOPICS),
-               self.cloud_update_topic, self.max_map_age, self.revoke_on_map_stale))
+               self.cloud_update_topic, self.max_map_age))
         self.check_forbidden_publishers()
 
     # ------------------------------------------------------------------ 回调
@@ -157,7 +161,9 @@ class ShadowGuard(Node):
         if msg.task_id > self.last_task_id:
             self.last_task_id = msg.task_id
         if not msg.active:
+            self.task_active = False
             return
+        self.task_active = True
         if not self.map_latched:
             return
         if msg.task_id <= self.latched_task_id:
@@ -243,17 +249,16 @@ class ShadowGuard(Node):
             return Twist(), "graph_violation"
         # 地图停更 = 任务失效：先锁止并撤销，而不是"临时输出零、恢复后继续放行"。
         stale_reason = self._map_stale_reason(now_s)
-        if stale_reason and self.map_ever_fresh and not self.map_latched \
-                and self.revoke_on_map_stale:
+        if stale_reason and self.map_ever_fresh and self.task_active and not self.map_latched:
             self.map_latched = True
             self.latched_task_id = self.last_task_id
             self._publish_reset(stale_reason, now_s)
         if self.map_latched:
-            if self.revoke_on_map_stale and (now_s - self._last_revoke) >= self.revoke_repeat_period:
+            if (now_s - self._last_revoke) >= self.revoke_repeat_period:
                 self._publish_reset(stale_reason or "map_latched", now_s)
             return Twist(), "map_latched"
-        if stale_reason and not self.map_ever_fresh:
-            # 启动阶段还没收到过心跳：直接零，但不锁止（此时也不会有任务）。
+        if stale_reason:
+            # 没有任务可撤销（启动阶段或任务已结束）：直接零，不锁止。
             return Twist(), stale_reason
         if not self.health:
             return Twist(), "inputs_unhealthy"

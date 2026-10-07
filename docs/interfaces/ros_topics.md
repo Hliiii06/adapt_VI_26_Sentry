@@ -189,5 +189,5 @@ uint32 task_id
 `path_out_topic`、`tf_future_tolerance`、`max_source_age`、`max_future_stamp`、`empty_frame_is_planning`；
 新增参数（`rm_input_adapter`）：`max_future_stamp`（默认 0.05 s）、`min_valid_points`（默认 10）；
 新增参数（`shadow_guard`）：`cloud_update_topic`、`max_map_age`（默认 0.5 s）、
-`task_active_topic`、`revoke_on_map_stale`（默认 true）、`revoke_repeat_period`（默认 1.0 s）；
+`task_active_topic`、`revoke_repeat_period`（默认 1.0 s）；地图过期始终停车，无关闭开关；
 GridMap 新增只读心跳发布 `grid_map/cloud_update`（不改变仿真订阅/参数默认值）。

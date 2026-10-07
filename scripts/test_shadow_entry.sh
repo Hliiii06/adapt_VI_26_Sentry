@@ -2,12 +2,15 @@
 # 影子接入场景测试（I1/I2 契约验收；失败返回非零）。
 #
 # 用法：
-#   bash scripts/test_shadow_entry.sh adapter_math        # 适配层数学单测（不需要 ROS 图）
+#   bash scripts/test_shadow_entry.sh adapter_math        # 适配层数学/点云布局单测（不需要 ROS 图）
+#   bash scripts/test_shadow_entry.sh guard_logic         # 影子门控逻辑单测（不需要 ROS 图）
 #   bash scripts/test_shadow_entry.sh no_inputs           # 无输入：不健康且影子输出为零
 #   bash scripts/test_shadow_entry.sh healthy_static      # 合成输入、无任务：健康但无运动
 #   bash scripts/test_shadow_entry.sh mode1_goal          # Mode 1 目标：候选速度流过门控
 #   bash scripts/test_shadow_entry.sh mode2_waypoints     # Mode 2 航点
 #   bash scripts/test_shadow_entry.sh mode3_path          # Mode 3 参考路线
+#   bash scripts/test_shadow_entry.sh task_frame_transform # 非单位 map→odom 与任务坐标转换
+#   bash scripts/test_shadow_entry.sh padded_cloud         # 行填充点云：重排为密集布局后走全链
 #   bash scripts/test_shadow_entry.sh cloud_stop          # 云中断
 #   bash scripts/test_shadow_entry.sh odom_stop           # odom / TF 中断
 #   bash scripts/test_shadow_entry.sh tf_stop             # 仅动态 TF 中断
@@ -47,6 +50,10 @@ export ROS_HOME="${REPO_ROOT}/log/ros"
 # 不需要 ROS 图的场景直接执行。
 if [[ "${SCENARIO}" == "adapter_math" ]]; then
   python3 scripts/test_shadow_adapter_math.py
+  exit $?
+fi
+if [[ "${SCENARIO}" == "guard_logic" ]]; then
+  python3 scripts/test_shadow_guard_logic.py
   exit $?
 fi
 
@@ -143,6 +150,16 @@ case "${SCENARIO}" in
     if ! grep -q "empty header.frame_id" "${LOG_DIR}/launch.log" \
        || ! grep -q "cannot transform 'no_such_frame'" "${LOG_DIR}/launch.log"; then
       echo "FAIL: 未看到空 frame / 未知 frame 的明确拒绝日志" >&2
+      RC=2
+    fi
+    ;;
+  padded_cloud)
+    # 带行填充的点云必须被适配层先重排为密集布局，再走 TF → GridMap → 规划。
+    run_fake --duration 60 --send-goal --padded-cloud
+    sleep 6
+    python3 scripts/check_shadow_graph.py --duration 10 --expect-healthy --expect-motion || RC=$?
+    if [[ "${RC}" -eq 0 ]] && ! grep -q "repacked to a dense layout" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 带行填充的点云没有被适配层重排为密集布局" >&2
       RC=2
     fi
     ;;
