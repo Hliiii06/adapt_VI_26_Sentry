@@ -1,3 +1,10 @@
+> **当前入口提示（2026-10-07 整理时添加，正文为用户原始任务书，未改动）**：
+> 本文是最初的架构侦察与迁移任务书，文中提到的目录树、文档清单（如 `gap_analysis.md`、
+> `s0_baseline.md`、`implementation_handoff.md`）与“本阶段不要实施”等表述是当时状态。
+> 当前阶段、文档导航与任务入口见 [docs/README.md](docs/README.md)；
+> 已实施内容见 [实施报告](docs/migration/implementation_report.md)；下一任务见
+> [实车影子接入交接](docs/migration/real_robot_handoff.md)。历史资料在 [docs/archive/](docs/archive/README.md)。
+
 你现在负责一个较大型的 ROS2 机器人导航工程迁移项目。
 
 请先不要急于修改导航核心代码。本任务的目标是：

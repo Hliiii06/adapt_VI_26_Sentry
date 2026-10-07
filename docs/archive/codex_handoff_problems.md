@@ -1,7 +1,12 @@
+> **历史资料（2026-10-07 归档）**：本文是 2026-10-01 移交 Codex 的**原始问题记录**。
+> 保留失败与错误判断的追溯价值，但**文中的嫌疑与归因不得再当作结论**：
+> 已由[真实 PCD 路线修复](../testing/pcd_route_fix.md)取代（A* 负坐标取整、模拟雷达虚增洞顶厚度、
+> 同 XY 底板/坡面/洞顶分层，均已修复）。当前入口见[docs/README](../README.md)。> 归档映射与保留边界见[整理报告](../migration/cleanup_report.md)。
+
 # Codex 交接：真实 PCD 下过不去斜坡与洞口
 
 **接手结果（2026-10-02）**：指定真实坡道及降低高度后的两处洞口已闭环通过。
-本文为原始问题记录，未证实的嫌疑不能继续当作结论；见 [修复与证据](pcd_route_fix.md)。
+本文为原始问题记录，未证实的嫌疑不能继续当作结论；见 [修复与证据](../testing/pcd_route_fix.md)。
 
 日期：2026-10-01。交接人：本会话的适配执行方。仓库 `adapt_VI_26_Sentry`，分支 `main`。
 
@@ -214,5 +219,5 @@ scripts/scenario.sh terrain_lateral | cancel_race | goal_out_of_grid
 - [真实场地地形核对](field_terrain_check.md)
 - [z 向膨胀参数核对与实测](inflation_analysis.md)
 - [降低高度做可通行性排查](height_sweep.md)
-- [地形与高度跟随](terrain_following.md)
+- [地形与高度跟随（历史全文）](terrain_following_history.md)
 - [Codex 第二轮复审修正](review_round2_fixes.md)

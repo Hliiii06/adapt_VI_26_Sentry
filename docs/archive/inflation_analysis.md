@@ -1,3 +1,12 @@
+> **历史资料（2026-10-07 归档，含更正）**：本文的**实测计数表与“减小 down/up 谁有效”的结论作废**：
+> 其 z 方向推导与 `src/planner/plan_env/src/grid_map.cpp::rebuildInflationOffsets` 相反
+> （障碍按 `[-z_down, +z_up]` 扩张，查询点 `p` 对应原始障碍高度带 `[p.z − z_up, p.z + z_down]`）。
+> 当前参数语义见 [SCAN 架构：碰撞包络参数](../architecture/scan_planner.md)。
+> 仍有效的部分：上游确为 `up=0.1 / down=0.4`（ROS1 参考），
+> 本适配取对称 `±0.125` 以覆盖 `[0, 0.25] m` 机体高度带；
+> 把包络压到小于机体真实尺寸会让规划器批准真实碰撞，不能采用；
+> 该处确有落在机体高度带内的材料。> 归档映射与保留边界见[整理报告](../migration/cleanup_report.md)。
+
 # z 向膨胀参数核对与实测
 
 日期：2026-10-01。起因：用户提出 SCAN-Planner 的体素 z 膨胀是"向上 0.1 / 向下 0.4"，

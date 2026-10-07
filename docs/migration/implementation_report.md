@@ -2,12 +2,17 @@
 
 实施范围：把 SCAN-Planner ROS 2（main `103bce4`）纳入本仓库并完成全向哨兵适配与
 PCD/RViz 闭环仿真。**未接实车、未修改 RM 的 LIO/配准/TF/Nav2 参数/串口/固件。**
-基线输入见 [S0 基线](s0_baseline.md)，测试结果见 [S3 结果](../testing/s3_results.md)。
+基线输入见[归档 S0 基线](../archive/s0_baseline.md)，当轮测试结果见[归档 S3 结果](../archive/s3_results.md)。
 
-## 第二轮：Codex 审查后的修正
+> **阅读约定（2026-10-07 整理）**：本文的“第二轮/第三轮”小节是历史轮次记录，保留当时证据；
+> **当前的改动边界是下面的“改动清单（相对上游 `103bce4`）”与 S1/S2 实现说明**。
+> 后续地形与高度跟随见[当前实现](../testing/terrain_following.md)，
+> 指定通道修复见[真实 PCD 路线修复](../testing/pcd_route_fix.md)。
+
+## 第二轮：Codex 审查后的修正（历史轮次）
 
 Codex 审查认为方向正确但**不能认定 S0–S3 已验收**，并提出 4 项缺陷 + 3 项判断。
-本轮的修正如下（详细证据见 [S3 结果](../testing/s3_results.md) 第四节）：
+本轮的修正如下（详细证据见[归档 S3 结果](../archive/s3_results.md) 第四节）：
 
 | 缺陷 | 修正 |
 |---|---|
@@ -31,7 +36,7 @@ Codex 审查认为方向正确但**不能认定 S0–S3 已验收**，并提出 
 新增脚本：`scripts/check_stop.py`（停车判据）、`scripts/check_passage.py`（通过/拒绝判据）、
 `scripts/make_test_maps.py`（合成地图）、`scripts/summarize_launch_log.sh`（日志摘要）。
 
-## 第三轮：地形分离与高度跟随
+## 第三轮：地形分离与高度跟随（历史轮次）
 
 用户验收 RViz 后反馈"坡度不明显"。排查确认根因不是 RViz 也不是缺 Gazebo：
 **运动模拟器的 z 恒定、且上一版绝对高度删点把地面整层删掉了**（631508 点只留 177762）。
@@ -120,7 +125,9 @@ Codex 审查认为方向正确但**不能认定 S0–S3 已验收**，并提出 
 因此把 `double_cylinder_offset` 设为 0 就让**全部入口**同时变为与朝向无关的单圆柱包络：
 
 - 有效半径 = `double_cylinder_radius`(0.26) + `safety_margin`(0.0) = 0.26 m
-- 高度带 = 轨迹 z ± `obstacles_inflation_z_*` = 0.125 ± 0.125 → `[0, 0.25]` m
+- 高度带：查询点在轨迹 z，命中原始障碍高度带为 `[z − z_up, z + z_down]`。
+  本适配 `z_up = z_down = 0.125`，因此是 `z ± 0.125` → `[0, 0.25]` m。
+  **只有上下对称时才能写成 `z ± 膨胀`**；参数方向语义见[SCAN 架构](../architecture/scan_planner.md)。
 
 代码里显式判断 `offset < 1e-9` 时只做一次单圆柱查询，避免靠参数巧合表达语义。
 启动日志会打印实际生效的包络，便于审查：

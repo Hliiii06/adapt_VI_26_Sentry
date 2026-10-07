@@ -1,82 +1,66 @@
-# 架构调研入口
+# 文档入口
 
-**当前任务（2026-10-07）**：暂停扩建仿真，先[整理代码与文档](migration/cleanup_handoff.md)，
-再做[I1/I2 实车数据影子接入](migration/real_robot_handoff.md)。尚未接管底盘，参考仓库只读。
+这是 ROS 2 全向哨兵从 Nav2 向 SCAN-Planner 迁移的文档与实施工作区。
+**每个主题只有一个当前入口**；历史过程与证据在 [docs/archive/](archive/README.md)。
 
-初始调研日期：2026-10-01，当时只做静态源码核对。后续已在实施副本构建并运行仿真；最新为
-2026-10-02 的 [真实 PCD 指定路线修复](testing/pcd_route_fix.md)及 2026-10-06 的六航点预览；当前转向影子接入规划。实车未验证。
-用户确认当前 RM 配置已实车通过 RViz 2D goal 规划与行驶；该结论来源于用户，不是 SCAN 测试结果。
+## 当前阶段（2026-10-07）
+
+- **交接 A 仓库整理已完成**：映射、保留边界与验证见[整理报告](migration/cleanup_report.md)。
+- **下一开发任务未开始**：[实车影子接入交接 B](migration/real_robot_handoff.md)，先做 I1/I2
+  影子运行，不驱动车辆；是否开始由用户批准（用户要求完成任务一后暂停）。
+- **未接实车、未授权底盘输出**；本仓库输出都在 `/sentry_sim` 命名空间内。
+- 参考仓库 RM `../VI_26_Sentry`、SCAN2 `../../SCAN-Planner-Ros2`、SCAN1 `../../SCAN-Planner` 保持只读。
+
+## 按职责找入口
+
+| 主题 | 当前入口 | 说明 |
+|---|---|---|
+| 工作区规则 | [AGENTS.md](../AGENTS.md) | 边界、参考路径、工程/安全规则 |
+| 构建与启动 | 根 [README.md](../README.md)、[scripts/README.md](../scripts/README.md) | 脚本分组与常用命令 |
+| 当前任务 | [交接 B](migration/real_robot_handoff.md) | I1/I2 契约、接口、测试矩阵（PROPOSED） |
+| 阶段与门槛 | [实施计划](migration/plan.md) | S/I 阶段、执行与停止规则、回退 |
+| 进展 | [进展](migration/progress.md) | 当前状态与最近变更（历史见[归档](archive/progress_history.md)） |
+| 决策 | [决策记录](migration/decisions.md) | 状态、日期、被谁取代 |
+| 接口映射 | [RM → SCAN 接口映射](migration/interface_mapping.md) | 当前差距与已有执行端 |
+| 实施改动 | [实施报告](migration/implementation_report.md) | 相对上游 `103bce4` 的改动清单（含历史轮次） |
+| RM 当前架构 | [当前 RM 导航](architecture/current_navigation.md) | main `7dfe71a`；用户已实车验证 |
+| SCAN 架构 | [SCAN-Planner ROS 2](architecture/scan_planner.md) | 上游基线 + 本仓库实施差异 + 包络参数语义 |
+| 目标架构 | [C 方案目标架构](architecture/target_architecture.md) | 分层与未实现的实车边界 |
+| 包与依赖 | [包清单](architecture/package_inventory.md) | 两工程 ROS package 清单 |
+| 接口契约 | [Topics](interfaces/ros_topics.md)、[Services/Actions](interfaces/ros_services_actions.md)、[TF](interfaces/tf_tree.md)、[底盘](interfaces/chassis_interface.md) | 当前契约与候选实车契约分开标识 |
+| 判据与验证 | [验证计划](testing/validation_plan.md) | 判据、门槛、可复用测试 |
+| 指定地形实验 | [真实 PCD 路线修复](testing/pcd_route_fix.md) | 三条通道当前操作与限制 |
+| 无支撑面预览 | [Mode 2 六 XYZ 航点](testing/mode2_waypoint_z_preview.md) | 与速度闭环严格分开 |
+| 地形与高度跟随 | [当前实现](testing/terrain_following.md) | 地面/障碍分离、链路、RViz 图层、局限 |
+| 构建/依赖查询 | [构建说明](testing/build_notes.md) | 历史构建尝试与依赖登记 |
+| 历史资料 | [归档索引](archive/README.md) | 被取代的报告、失败记录、旧交接跳转 |
+| 原始证据 | [evidence/](testing/evidence/) | 场景报告、`cmd_vel` 记录、日志摘要、基线快照 |
+| 测试地图 | [maps/](testing/maps/) | 几何尺寸明确的受控地图与航点（运行资产，不搬迁） |
 
 ## 版本基线
 
 | 简写 | 工作区相对路径 | 参考版本 | 状态 |
 |---|---|---|---|
-| RM | `../VI_26_Sentry` | main，`7dfe71a5dbac8bd9b14cb618f0df960942611156` | 用户已拉取更新；main 与本地 origin/main 一致；本轮只读复核 |
-| SCAN2 | `../../SCAN-Planner-Ros2` | main，`103bce48bd9de783511d20e286c5e6299b79e47a` | 干净；本地和已记录远端引用仅 main，未发现 ros2-community |
-| SCAN1 | `../../SCAN-Planner` | main，`f12161392264e57590ae4aa00c24208c9e3b2a82` + 用户修改 | 只用于注释和实现理解，不作为 ROS 2 接口依据 |
+| RM | `../VI_26_Sentry` | main，`7dfe71a5dbac8bd9b14cb618f0df960942611156` | 用户已拉取；main 与本地 origin/main 一致；只读复核 |
+| SCAN2 | `../../SCAN-Planner-Ros2` | main，`103bce48bd9de783511d20e286c5e6299b79e47a` | 干净；仅 main，无 ros2-community 分支 |
+| SCAN1 | `../../SCAN-Planner` | main，`f12161392264e57590ae4aa00c24208c9e3b2a82` + 用户修改 | 仅注释与实现理解，不作为 ROS 2 接口依据 |
 
-RM 保留未跟踪的 `src/Sophus/`、`src/hnurm_navigation/BRINGUP_LAUNCH_EXPLAINED.md`。SCAN1 保留六个已修改源码：`bspline_optimizer.cpp`、`uniform_bspline.cpp`、`grid_map.h`、`plan_container.hpp`、`planner_manager.cpp`、`scan_replan_fsm.cpp`，以及未跟踪 `AGENTS.md` 和 `PROJECT_CODE_READING_GUIDE.md`。因此其注释不能自动代表 SCAN2 行为。
-
-本文档中的 `RM/src/...`、`SCAN2/src/...` 都相对于上表源码根目录。快照之外的发布版本、依赖实现和实车参数覆盖属于 UNKNOWN。参考仓库中的 `build/`、`install/` 可能来自其他提交，不用它们推断 main 的运行行为。
-
-## 最新实施入口
-
-- [2026-10-06 Mode 2：关闭支撑面、六个 XYZ 航点](testing/mode2_waypoint_z_preview.md)：原始 PCD 三维轨迹预览，不是轮地接触或速度闭环验证。
-
-- [2026-10-06 Mode 2：真实洞口与坡道往返](testing/mode2_field_roundtrip.md)：自动过洞、上坡、折返下坡并返回；保留支撑面，诊断车高 0.10 m。
-
-S0–S3 及后续修正已在 `src/` 内实施。最新已打通指定真实坡道及降低高度后的两个洞口；
-尚未接 VI_26_Sentry 实车，RViz 图形交互未验证。
-
-- **[最新：真实 PCD 路线修复与启动入口](testing/pcd_route_fix.md)**：已确认原因、改动、正反例与限制。
-
-- [S0 基线](migration/s0_baseline.md)：PCD 分析、机器人/外参/限速输入、坐标系与高度约定。
-- [实施报告](migration/implementation_report.md)：相对上游 `103bce4` 的改动清单、理由，
-  以及第二轮对 Codex 审查意见的处理。
-- [S3 结果](testing/s3_results.md)：受控碰撞场景矩阵、三模式与失效停止实测数据、
-  独立净空检查、上一轮缺陷与修正、未验证项。
-- **[Codex 交接：真实 PCD 下过不去斜坡与洞口](testing/codex_handoff_problems.md)** ——
-  原始交接问题与假设，保留追溯；部分归因已由最新修复报告取代。
-- [降低高度做可通行性排查](testing/height_sweep.md)：新增 `robot_height` 单一旋钮；
-  记录修复前高度扫描；H=0.10 失败已在本轮解决，旧窄通道归因不再适用。
-- [z 向膨胀参数核对与实测](testing/inflation_analysis.md)：上游 `advanced_param.xml`
-  确为 up=0.1 / down=0.4；实测减小 down 对过洞无效（阻挡点在机体中心上方），
-  有效的是 up；并记录我先前"上游没有这两个参数"的错误结论及其原因。
-- [Codex 第二轮复审修正](testing/review_round2_fixes.md)：优化后才赋地形高度、
-  显示与包络几何一致、取消立即本地锁止 + 授权带 task_id、越界拒绝规划/停在边界、
-  停车判据改完整时长；含 cancel_race / goal_out_of_grid / terrain_lateral 三个新场景。
-- [真实场地地形核对](testing/field_terrain_check.md)：用户给的三处地形坐标逐处核对，
-  **更正了 tunnel_diagnosis.md 前面过于确定的"被坎隔开"结论**；含受控洞口场景
-  （高洞通过 / 低洞拒绝）与判据推导（阈值为 0.25 m，不是 0.375 m）。
-- [地形与高度跟随](testing/terrain_following.md)：地面分离方法、高度跟随、
-  合成坡道与真实场地的实测、局限、RViz 查看命令。**注意：该文更正了 S3 里
-  "x=−6 走廊净空 1.187 m"的旧结论（那是删点造成的假象）。**
-- [原始证据](testing/evidence/)：场景报告、`cmd_vel` 记录、日志摘要。
-- [合成测试地图](testing/maps/)：几何尺寸明确的受控地图与 `INDEX.txt`。
-- [实施计划](migration/plan.md)、[harness 交接说明](migration/implementation_handoff.md)：阶段划分与交付边界。
-
-仓库入口与构建/启动命令见根 [README.md](../README.md)。
-
-## 15 分钟阅读顺序
-
-1. [当前导航](architecture/current_navigation.md)：入口、数据流与实际 Nav2 职责。
-2. [SCAN](architecture/scan_planner.md)：算法边界、三维能力和控制约束。
-3. [接口映射](migration/interface_mapping.md)与[缺口](migration/gap_analysis.md)。
-4. [候选架构](architecture/target_architecture.md)与[决策状态](migration/decisions.md)。
-5. [计划](migration/plan.md)、[当前进展](migration/progress.md)和[验证计划](testing/validation_plan.md)。
-
-查表入口：[包清单](architecture/package_inventory.md)、[Topics](interfaces/ros_topics.md)、[Services/Actions](interfaces/ros_services_actions.md)、[TF](interfaces/tf_tree.md)、[底盘](interfaces/chassis_interface.md)、[构建说明](testing/build_notes.md)。
+RM 保留未跟踪的 `src/Sophus/`、`src/hnurm_navigation/BRINGUP_LAUNCH_EXPLAINED.md`；
+SCAN1 保留六个已修改源码与未跟踪 `AGENTS.md`、`PROJECT_CODE_READING_GUIDE.md`，
+其注释不能自动代表 SCAN2 行为。参考仓库的 `build/`、`install/` 可能来自其他提交，不用于推断 main 行为。
+整理前的完整快照见 [cleanup_baseline_2026-10-07.txt](testing/evidence/cleanup_baseline_2026-10-07.txt)。
 
 ## 证据约定
 
-- **CONFIRMED**：在上述版本源码或配置中直接存在；若为用户实车验证则显式注明来源。静态源码本身不是运行成功证明。
-- **INFERRED**：由调用链推导；说明成立条件。
+- **CONFIRMED**：在给定版本源码/配置中直接存在；若为用户实车验证则显式注明来源。
+- **INFERRED**：由调用链或已有数据推导，说明成立条件。
 - **UNKNOWN**：缺少运行记录、硬件协议或依赖版本等证据。
 - **PROPOSED**：设计建议，尚未获得实施批准。
+- 静态源码不是运行成功证明；未由本轮运行验证的内容不能声称本轮实测。
 
 ## 关键源码入口
 
-以下链接从本文件出发可直接访问参考源码；子文档使用简写和函数名定位。
+从本文件出发可直接访问参考源码；子文档使用简写和函数名定位（证据编号 R/S）。
 
 | ID | 文件 | 阅读重点 |
 |---|---|---|
@@ -105,6 +89,12 @@ S0–S3 及后续修正已在 `src/` 内实施。最新已打通指定真实坡�
 | S9 | [planner.yaml](../../../SCAN-Planner-Ros2/src/planner/plan_manage/config/planner.yaml) | 网格、几何体、规划速度参数 |
 | S10 | [controllers.yaml](../../../SCAN-Planner-Ros2/src/planner/plan_manage/config/controllers.yaml) | 限速及仿真配置 |
 
+本仓库实施副本 `src/` 的来源与改动边界见[实施报告](migration/implementation_report.md)。
+
 ## 最重要的结论
 
-当前 RM 使用三维感知和定位，但以二维 costmap + Smac2D + MPPI Omni 导航。SCAN2 使用三维占据/碰撞，但这份实现的 z 来自参考高度、A* 插值和初始化，优化器不沿 z 优化；闭环只控制 XY/yaw。这正是用户所指的“三维导航”，不额外要求自由 z 优化、跨层全局搜索或完整轮地接触规划。C 方向已获认可：保留已验证的感知定位/底盘基础，适配 SCAN 与全向执行；仍需补齐输入、任务和停止契约。更新详情见 [基线更新](migration/baseline_update.md)，实施顺序见 [计划](migration/plan.md)。
+当前 RM 使用三维感知和定位，但以二维 costmap + Smac2D + MPPI Omni 导航。SCAN2 使用三维占据/碰撞，
+但这份实现的 z 来自参考高度、A* 插值和初始化，优化器不沿 z 优化；闭环只控制 XY/yaw。
+这正是用户所指的“三维导航”，不额外要求自由 z 优化、跨层全局搜索或完整轮地接触规划。
+C 方向已获认可：保留已验证的感知定位/底盘基础，适配 SCAN 与全向执行；仍需补齐输入、任务和停止契约。
+RM 的 `82d0741→7dfe71a` 变更详情见[归档](archive/baseline_update.md)。

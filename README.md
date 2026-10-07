@@ -7,10 +7,10 @@ ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 迁移的调研、实施与
 
 ## 当前状态
 
-**2026-10-07：暂停扩建仿真，转向实车接入准备。** 下一轮先按
-[整理指引](docs/migration/cleanup_handoff.md)收敛代码与文档，再按
-[I1/I2 影子接入交接](docs/migration/real_robot_handoff.md)接入 RM 数据；尚不输出底盘命令。
-下文为已完成的仿真阶段记录。
+**2026-10-07：暂停扩建仿真，转向实车接入准备。** 交接 A 仓库整理**已完成**
+（[整理报告](docs/migration/cleanup_report.md)，历史资料见 [docs/archive](docs/archive/README.md)）；
+下一开发任务是按[I1/I2 影子接入交接](docs/migration/real_robot_handoff.md)接入 RM 数据，
+**尚未获准开始**（用户要求整理完成后暂停），当前不输出底盘命令。下文为已完成的仿真阶段记录。
 
 2026-10-02：已修复 A* 下坡取整和模拟雷达虚增洞顶厚度，并实现用户批准的指定通道支撑层选择。
 真实 PCD 大坡在半径 0.26 / 高度 0.25 m 下到达；两个洞口及后坡在高度 0.10 m 下到达，
@@ -19,15 +19,15 @@ ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 迁移的调研、实施与
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| S0 | 记录基线、PCD、外形、外参、限速 | 完成，见 [S0 基线](docs/migration/s0_baseline.md) |
+| S0 | 记录基线、PCD、外形、外参、限速 | 完成，见[归档 S0 基线](docs/archive/s0_baseline.md) |
 | S1 | 全向适配：odom 朝向、取消强制对齐、全向碰撞包络 | 完成，见 [实施报告](docs/migration/implementation_report.md) |
 | S2 | PCD + RViz 闭环仿真（速度积分反馈 odom） | 完成 |
-| S3 | 三模式与失效场景验证 | 完成（第二轮修正后），见 [测试结果](docs/testing/s3_results.md) |
+| S3 | 三模式与失效场景验证 | 完成（第二轮修正后），见[归档测试结果](docs/archive/s3_results.md) |
 | T | 地形分离与高度跟随（RViz 可见坡度） | 完成，见 [地形与高度跟随](docs/testing/terrain_following.md) |
 | — | Codex 第一轮审查 | 已完成，发现 4 项缺陷，已修正 |
-| — | Codex 复审 | 已完成，5 项基础缺陷 + 遗留项已修正；见 [地形核对](docs/testing/field_terrain_check.md) |
-| — | Codex 第二轮复审 | 已完成，4 项实现问题已修正；见 [第二轮修正](docs/testing/review_round2_fixes.md) |
-| T2 | 受控洞口场景（高洞过 / 低洞拒） | 完成，见 [真实场地地形核对](docs/testing/field_terrain_check.md) |
+| — | Codex 复审 | 已完成，5 项基础缺陷 + 遗留项已修正；见[归档地形核对](docs/archive/field_terrain_check.md) |
+| — | Codex 第二轮复审 | 已完成，4 项实现问题已修正；见[归档第二轮证据](docs/archive/review_round2_fixes.md) |
+| T2 | 受控洞口场景（高洞过 / 低洞拒） | 完成，见[归档地形核对](docs/archive/field_terrain_check.md)与[当前路线修复](docs/testing/pcd_route_fix.md) |
 | T3 | RViz 实体显示（地形网格 + 实体机体） | 已实现，**观感待用户验收** |
 | I1–I4 | 接入 VI_26_Sentry 实车 | 未开始，另获授权后进行 |
 
@@ -63,7 +63,7 @@ scripts/run_sentry_sim.sh start_rviz:=false               # 无界面
 ```
 
 **带地形（RViz 里能看见坡度）**：完整命令见
-[地形与高度跟随](docs/testing/terrain_following.md) 第七节。要点是四个参数一起给：
+[地形与高度跟随](docs/testing/terrain_following.md) 第四节。要点是四个参数一起给：
 `ground_file`（地形表面显示）、`ground_grid_file`（高度查询）、
 `pcd_map_file`（只含障碍）、`map_offset_z:=0.0`。
 
@@ -91,8 +91,9 @@ scripts/summarize_launch_log.sh      # 生成可审查的日志摘要
 ```text
 AGENTS.md              工作区规则（改代码前先读）
 build.md               最初的架构侦察任务书
-docs/                  调研、架构、接口、迁移与测试文档（入口 docs/README.md）
-scripts/               构建 / 启动 / 场景验证 / 独立净空检查
+docs/                  调研、架构、接口、迁移与测试文档（入口 docs/README.md，
+                       历史资料在 docs/archive/）
+scripts/               构建 / 启动 / 场景验证 / 独立净空检查（分组见 scripts/README.md）
 src/planner/           纳入本仓库的 SCAN-Planner 包（见下方来源）
 src/simulator/         地图发布、局部雷达渲染、合成地图
 ```
@@ -113,4 +114,4 @@ src/simulator/         地图发布、局部雷达渲染、合成地图
   **不能当作实车爬坡验证**；优化后的控制点按地面重赋高度，A* 搜索仍有线性高度参考限制。
 - **加速度上限**：RM 的 MPPI 加速度上限为 UNKNOWN，仿真用的是示例值。
 - **安全余量**：用户未给出，当前 `safety_margin = 0`。
-- 详细限制与未测项见 [测试结果](docs/testing/s3_results.md)。
+- 详细限制与未测项见[归档 S3 结果](docs/archive/s3_results.md)与[地形与高度跟随](docs/testing/terrain_following.md)。

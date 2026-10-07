@@ -2,9 +2,12 @@
 
 这是 ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 及其他算法迁移的工作区。2026-10-07 用户决定**暂停扩建仿真，进入仓库整理与 I1/I2 实车数据影子接入准备**；尚未授权底盘输出或实车运行。
 
-当前交接优先级高于下文历史阶段描述：先执行[整理指引](docs/migration/cleanup_handoff.md)，
-再按[实车影子接入交接](docs/migration/real_robot_handoff.md)开发；实施仍在本仓库，RM 和 SCAN 参考仓库继续只读。
+**交接 A 仓库整理已完成**（[整理报告](docs/migration/cleanup_report.md)）；当前等待用户批准后再执行
+[实车影子接入交接 B](docs/migration/real_robot_handoff.md)（[整理指引 A](docs/migration/cleanup_handoff.md) 已交付）。
+实施仍在本仓库，RM 和 SCAN 参考仓库继续只读。
 保留已有仿真作回归，不扩展 Gazebo，不把无支撑面的开环航点预览接到实车。
+历史过程与证据在 [docs/archive/](docs/archive/README.md)：引用归档页必须写明“历史记录”及取代它的当前文档，
+不能把其中的旧归因当作当前事实；不删除失败记录，不搬迁 `docs/testing/maps/`、`docs/testing/evidence/`。
 
 ## 范围与源码
 
@@ -14,7 +17,7 @@
 - 本目录自 2026-10-01 起是**私有 Git 仓库**：`git@github.com:Hliiii06/adapt_VI_26_Sentry.git`，主分支 `main`。入库内容是文档、`scripts/`、`AGENTS.md`、`README.md`、`build.md` 与 `src/`（纳入本仓库的 SCAN 源码）；`artifacts/`、`log/`、`build/`、`install/` 由 `.gitignore` 排除，编译产物不入库，也不要用 `git add -f` 绕过。
 - 参考仓库（`../VI_26_Sentry`、`../../SCAN-Planner-Ros2`、`../../SCAN-Planner`）各有自己的远端，不要在本仓库提交或推送它们的源码与改动；本仓库正常提交/推送无需再逐次征求许可，但**推送前**确认没有密钥、串口配置等敏感文件被新增进跟踪范围。
 - **`src/` 是实施副本，不是参考仓库**：来源为 SCAN-Planner-Ros2 main `103bce4`，改动边界见 [实施报告](docs/migration/implementation_report.md)。不要再把 `../../SCAN-Planner-Ros2` 当作待改代码；它保持只读。RM 的 `../VI_26_Sentry` 始终只读。
-- 当前阶段：**S0–S3 已实施；地形分离与高度跟随、Codex 两轮审查的修正、受控洞口场景（高洞过/低洞拒）、RViz 实体显示、真实场地三处坐标核对均已完成；第二轮复审的 4 项实现问题（优化后才赋地形高度、显示与包络几何一致、取消立即本地锁止、越界拒绝）已修正**，尚未接入 VI_26_Sentry 实车。RViz 图形交互在本环境无法验证。实施入口见 [实施报告](docs/migration/implementation_report.md)，测试证据见 [S3 结果](docs/testing/s3_results.md)，地形见 [地形与高度跟随](docs/testing/terrain_following.md)，洞口与真实场地核对见 [真实场地地形核对](docs/testing/field_terrain_check.md)。
+- 当前阶段：**S0–S3 已实施；地形分离与高度跟随、Codex 两轮审查的修正、受控洞口场景（高洞过/低洞拒）、RViz 实体显示、真实场地三处坐标核对均已完成；第二轮复审的 4 项实现问题（优化后才赋地形高度、显示与包络几何一致、取消立即本地锁止、越界拒绝）已修正**，尚未接入 VI_26_Sentry 实车。RViz 图形交互在本环境无法验证。实施入口见 [实施报告](docs/migration/implementation_report.md)，当轮测试证据见 [归档 S3 结果](docs/archive/s3_results.md)，地形见 [地形与高度跟随](docs/testing/terrain_following.md)，指定路线与洞口见 [真实 PCD 路线修复](docs/testing/pcd_route_fix.md)（旧的[地形核对](docs/archive/field_terrain_check.md)已归档）。
 
 用户最新确认：三维导航指 SCAN 当前的三维占据/空间避障与参考高度实现，不要求自由三维或完整地形通行规划；现有 RM 配置已由用户验证 RViz 2D goal 规划并驱动实车；小陀螺部分由电控负责，仓库相关源码不代表实际执行路径。C 方向已认可，实施结果见 [实施报告](docs/migration/implementation_report.md)。
 
@@ -23,7 +26,7 @@
 后续接手优先读 [真实 PCD 修复与入口](docs/testing/pcd_route_fix.md)，其中结果取代旧的最低层/窄通道归因。
 不扩大 Gazebo 或全场多层规划，不改 RM；默认真实尺寸与诊断缩小尺寸必须明确区分。
 
-最新实施顺序与交付边界以 [实施计划](docs/migration/plan.md)和 [harness 交接说明](docs/migration/implementation_handoff.md)为准：保留三种模式，适配 odom 朝向、全向跟踪和碰撞检查；用用户 PCD 完成 RViz 闭环运动仿真，再审查、再接入 VI_26_Sentry。
+当前实施顺序与交付边界以[实施计划](docs/migration/plan.md)和[实车交接 B](docs/migration/real_robot_handoff.md)为准；最初的 harness 交接已归档，原路径 [implementation_handoff.md](docs/migration/implementation_handoff.md) 只是跳转页。
 
 ## 开始工作前
 
@@ -51,7 +54,7 @@
 
 ## 验证与安全
 
-涉及 cmd_vel、轨迹、TF、定位、里程计、碰撞、速度/加速度或底盘控制时，`colcon build` 成功不等于完成。按静态验证 → 构建 → 仿真/rosbag → 可视化 → 受控实车测试推进，见 [验证计划](docs/testing/validation_plan.md)。仿真阶段已执行（结果见 [S3 结果](docs/testing/s3_results.md)）；**RViz 图形交互在本环境无法验证**（无法创建 OpenGL 上下文），实车测试未开始。
+涉及 cmd_vel、轨迹、TF、定位、里程计、碰撞、速度/加速度或底盘控制时，`colcon build` 成功不等于完成。按静态验证 → 构建 → 仿真/rosbag → 可视化 → 受控实车测试推进，见 [验证计划](docs/testing/validation_plan.md)。仿真阶段已执行（当轮结果见[归档 S3 结果](docs/archive/s3_results.md)、[真实 PCD 路线修复](docs/testing/pcd_route_fix.md)）；**RViz 图形交互在本环境无法验证**（无法创建 OpenGL 上下文），实车测试未开始。
 
 SCAN 的 `open_loop_controller` 会直接发布模拟里程计，不是实车速度接口。不能因名字有 controller 就接入定位话题。两个规划器并存时，最终速度输出必须有单一授权来源。
 
@@ -73,7 +76,7 @@ scripts/scenario.sh terrain_lateral    # 横向坡面绕障：规划高度 vs �
 scripts/scenario.sh cancel_race        # 规划期间取消 + 注入延迟旧授权/新时间戳轨迹
 scripts/scenario.sh goal_out_of_grid   # 目标在已知地面之外：拒绝规划且不动
 # 降低机器人高度做可通行性排查：robot_height 是唯一高度旋钮（派生 body_height
-# 与 z 包络）。见 docs/testing/height_sweep.md
+# 与 z 包络）。历史高度扫描见 docs/archive/height_sweep.md
 scripts/run_sentry_sim.sh navi_mode:=1 robot_height:=0.10 ...
 scripts/prepare_terrain_map.py --input ~/pcd_map/rmuc2026_field.pcd \
   --out-prefix docs/testing/maps/field/rmuc2026   # 真实场地地形分离
@@ -91,4 +94,5 @@ git -C ../VI_26_Sentry diff --check
 
 后续编译基于 ROS 2 Humble + colcon；RM 含嵌套工作区和依赖声明差异，不能把全量编译视为已确认标准流程。SCAN README 给出 `colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release`。隔离目录、依赖检查和本轮未构建状态见 [构建说明](docs/testing/build_notes.md)。
 
-完成任务时更新 `progress.md`；确认参考仓库无源码修改，文档链接有效，未把 proposed 决策写成已批准。
+完成任务时更新 [progress.md](docs/migration/progress.md)；确认参考仓库无源码修改，文档链接有效，未把 proposed 决策写成已批准。
+脚本分组见 [scripts/README.md](scripts/README.md)；整理时先写移动/合并映射再操作（本次模板见 [cleanup_report.md](docs/migration/cleanup_report.md)）。

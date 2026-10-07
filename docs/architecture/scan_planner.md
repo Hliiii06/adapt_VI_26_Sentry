@@ -2,6 +2,22 @@
 
 基线：SCAN2 main `103bce4`。证据链接 S1–S10 见 [入口](../README.md)。ROS1 注释辅助理解，ROS2 源码决定本文件结论。
 
+## 上游基线与本仓库实施版本
+
+本页默认描述**上游 SCAN2 main `103bce4`**；`src/` 已在其上完成全向适配，
+行为不同的地方以“**本仓库实施**”标出。完整改动清单与理由见[实施报告](../migration/implementation_report.md)。
+
+| 维度 | 上游 `103bce4` | 本仓库实施 |
+|---|---|---|
+| 碰撞包络 | 双圆柱，方向取轨迹切线 yaw | `double_cylinder_offset = 0` 单圆柱，朝向无关（半径 0.26 + `safety_margin`） |
+| 跟踪 yaw 门槛 | `abs(yaw_error) > 0.8` 时冻结轨迹、只转向 | 取消门槛；新增 `yaw_mode`(hold/align/spin) |
+| odom 新鲜度 | 无超时（`have_odom` 一旦 true 保持） | `odom_timeout` 超时停车并遗忘轨迹 |
+| 轨迹时间 | 收到即 `exec_time = 0` | 按消息 `start_time` 对齐；过期/未来时间明确拒绝 |
+| 取消 | 无 `planning/reset` | FSM 与跟踪器订阅，本地立即锁止；`TaskAuthorization` 带 `task_id` |
+| 轨迹高度 | 局部起终点线性 z | 地面网格赋 z（优化后按新 XY 重赋），越出网格拒绝整条轨迹 |
+
+详见[真实 PCD 路线修复](../testing/pcd_route_fix.md)与[地形与高度跟随](../testing/terrain_following.md)。
+
 ## 职责与数据流
 
 ```mermaid
@@ -49,7 +65,7 @@ GridMap、FSM、PlannerManager 和优化库在一个 `scan_planner_node` 进程�
 - S3 `applyLinearZReference()` 按 XY 路径长度把局部起点/终点的高度插入初始化点。
 - S6 `AstarSearch()` 只枚举 dx/dy 邻居，用 `interpolateZIndexOnSearchPlane()` 决定 z。不能因使用 Vector3i 和三维数组，就称为任意 26 邻域三维搜索。
 - S7 `combineCostRebound()` / `combineCostRefine()` 的组合梯度中都有 `grad_3D.row(2).setZero()`。优化器数组有 xyz，不等于它会主动优化高度绕障。
-- Mode 1 把目标 z 设成收到的初始 body_pose 高度。Mode 3 在参考路径 z 上加 `grid_map.body_height`（默认 0.4 m），按 0.5 m 三维距离降采样并保留末点，至少两个不同点。依据 `reference_path_utils.h`。
+- Mode 1 上游把目标 z 设成收到的初始 body_pose 高度（**本仓库实施**：给出 `ground_grid_file` 时改为目标处地面 + `body_height`）。Mode 3 在参考路径 z 上加 `grid_map.body_height`（默认 0.4 m），按 0.5 m 三维距离降采样并保留末点，至少两个不同点。依据 `reference_path_utils.h`。
 - 原生闭环只使用 XY 位置误差与 yaw，不控制 z；`go2_kinematic_sim` 保持 z 不变。
 - `open_loop_controller` 直接将三维轨迹求值结果发布为模拟里程计。跨层演示成功不能证明实车爬坡、车轮接地或跟踪能力。
 
@@ -70,9 +86,26 @@ GridMap、FSM、PlannerManager 和优化库在一个 `scan_planner_node` 进程�
 
 S5 `getInflateOccupancy(pos,yaw)` 在机身前后 ±offset 采样膨胀地图，近似双圆柱。默认半径 0.25 m、offset 0.18 m、上下膨胀各 0.1 m。`body_height=0.4` 是路线 z 的偏置，不可直接当成机器人完整碰撞高度。
 
-查询方向主要来自轨迹切线（S7 `estimateSegmentYaw`、FSM `estimateYawFromSegment`），没有独立优化底盘 yaw、roll、pitch。全向横移/小陀螺时，实际机身朝向与轨迹切线可能不同，不能直接保证双圆柱包络覆盖真实外形。
+查询方向主要来自轨迹切线（S7 `estimateSegmentYaw`、FSM `estimateYawFromSegment`），没有独立优化底盘 yaw、roll、pitch。
+全向横移/小陀螺时，实际机身朝向与轨迹切线可能不同，不能直接保证双圆柱包络覆盖真实外形；
+**本仓库实施**用与朝向无关的单圆柱消除这一依赖。
 
-闭环 S8 是“轨迹前馈 + XY 比例反馈 + yaw 比例反馈”，先将 world 速度旋转到 body，再分别限幅 vx/vy。它允许 vy，**不是差速控制器**，但也不等于朝向完全解耦的哨兵控制：yaw 误差超过 0.8 rad 时先停止平移、原地对齐，期间冻结轨迹。
+### 碰撞包络参数语义（以本仓库 `grid_map.cpp` 复核）
+
+`GridMap::rebuildInflationOffsets()`（`src/planner/plan_env/src/grid_map.cpp`）把每个占据体素的膨胀偏移取为
+`z ∈ [-ceil(z_down/res), +ceil(z_up/res)]`，`updateInflationLayer()` 以 `inf_id = id + offset` 标记占据。
+因此这两个参数描述的是**障碍的膨胀方向**，不是“机器人的包络向哪边扩”：
+
+- 障碍体素向上膨胀 `z_up`、向下膨胀 `z_down`；
+- 反解到查询点 `p`（机体中心），会命中的原始障碍高度带是 `[p.z − z_up, p.z + z_down]`；
+- 只有 `z_up = z_down` 时该带才关于查询点对称，才可以简写成 `p.z ± z`。
+
+本适配取 `z_up = z_down = robot_height/2`（默认 0.125 m），查询点在 `地面 + body_height`，
+命中带正好是 `[地面, 地面 + 0.25] m` 的机体高度带。把 `up/down` 说成“机器人向上/向下包络”，
+或不加说明地写成 `p.z ± z_up/down`，都会把方向写反；不对称参数尤其如此。
+历史核对过程与一处写反的旧结论见[归档](../archive/inflation_analysis.md)。
+
+闭环 S8 是“轨迹前馈 + XY 比例反馈 + yaw 比例反馈”，先将 world 速度旋转到 body，再分别限幅 vx/vy。它允许 vy，**不是差速控制器**。上游在 yaw 误差超过 0.8 rad 时先停止平移、原地对齐并冻结轨迹；**本仓库实施已取消该门槛**，任何 yaw 误差都不阻塞 XY 运动（否则 RM 不转发 `angular.z` 会永久冻结）。
 
 | 参数 | 默认值 | 注意 |
 |---|---|---|

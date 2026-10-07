@@ -1,7 +1,13 @@
+> **历史资料（2026-10-07 归档）**：本页是**有支撑面**的 Mode 2 洞口—坡道往返对照
+> （2026-10-06，无界面运行，诊断车高 H=0.10 m）。可运行命令与航点文件保留：
+> `bash scripts/run_field_route.sh south_tunnel navi_mode:=2 robot_height:=0.10 init_z:=0.07`
+> `keypoints_file:=$PWD/docs/testing/maps/field/south_tunnel_roundtrip_mode2.yaml`。
+> 当前“关闭支撑面、六个 XYZ 航点”的预览见 [Mode 2 无支撑面预览](../testing/mode2_waypoint_z_preview.md)。> 归档映射与保留边界见[整理报告](../migration/cleanup_report.md)。
+
 # Mode 2：真实南侧洞口与坡道往返
 
 本页保留为有支撑面的历史对照。用户最新要求的**关闭支撑面、六个 XYZ 航点**实验见
-[无支撑面 Mode 2 预览](mode2_waypoint_z_preview.md)，不要使用本页命令代替。
+[无支撑面 Mode 2 预览](../testing/mode2_waypoint_z_preview.md)，不要使用本页命令代替。
 
 日期：2026-10-06。使用已验证的同一条南侧通道，行程为：
 **洞外出发 → 穿洞 → 上坡 → 平台折返 → 下坡 → 再穿洞 → 返回洞外**。
@@ -26,7 +32,7 @@ z 是机体中心高度，且此前同一洞口 H=0.25 m 未通过。没有实�
 
 ## 航点及含义
 
-配置：[south_tunnel_roundtrip_mode2.yaml](maps/field/south_tunnel_roundtrip_mode2.yaml)。
+配置：[south_tunnel_roundtrip_mode2.yaml](../testing/maps/field/south_tunnel_roundtrip_mode2.yaml)。
 
 | 位置 | x | y | 机体中心 z（m） |
 |---|---:|---:|---:|
