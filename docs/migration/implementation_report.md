@@ -49,7 +49,7 @@ Codex 审查认为方向正确但**不能认定 S0–S3 已验收**，并提出 
 | `scripts/prepare_terrain_map.py`（新） | 本地地面估计：每格低分位数 + 稳健迭代拟合二次曲面（RMS 0.05 m），障碍 = 高于地面 ≥ 0.08 m；输出障碍云 / 地形表面 / 地面网格 |
 | `plan_manage/include/plan_manage/ground_height_map.h`（新） | 地面高度网格加载与双线性查询，供模拟器与 FSM 共用 |
 | `plan_manage/src/go2_kinematic_sim.cpp` | 新增 `ground_grid_file`/`body_height`；z = 地面(x,y) + body_height（由地形推导，不抄轨迹 z） |
-| `plan_manage/src/scan_replan_fsm.cpp`、头文件 | 新增 `grid_map.ground_grid_file`；Mode 1 目标高度改为**目标处地面 + body_height** |
+| `plan_manage/src/scan_replan_fsm.cpp`、头文件 | 新增 `grid_map.ground_grid_file`；**加载该网格时** Mode 1 目标高度改为**目标处地面 + body_height**（`terrain_following_`），未加载时沿用初始 odom 高度 |
 | `simulator/map_generator/src/map_publisher.cpp` | 新增 `ground_file` → 发布 `ground_surface`（**仅显示，绝不喂给 SCAN**）；高度窗口未删点时降为 INFO |
 | `launch/sentry_sim.launch.py`、`launch/sentry_sim.rviz` | 新增 `ground_file`/`ground_grid_file` 参数；RViz 增加"Terrain surface (colour = height)"显示 |
 | `scripts/make_terrain_maps.py`（新） | 生成 10°/20°/30° 合成坡道 + 解析式地面网格（角度给定，可定量） |

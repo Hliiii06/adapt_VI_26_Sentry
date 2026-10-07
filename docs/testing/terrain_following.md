@@ -6,16 +6,22 @@
 
 ## 一、地面与障碍必须分开
 
-地面点**绝不能**进 SCAN 的占据栅格，否则地面自身即为障碍。当前工具分两级：
+在**贴地支撑面**实验中，地面点**不能**进 SCAN 的占据栅格，否则地面自身即为障碍；
+地面改由独立的 `ground_grid_file` 网格提供给规划器与模拟器。
+这不否定[无支撑面预览](mode2_waypoint_z_preview.md)：那个诊断模式刻意**保留原始地面点**，
+用离地圆柱检查三维净空，不是贴地通行实验。当前工具分两级：
 
 | 工具 | 方法 | 适用范围 |
 |---|---|---|
-| `scripts/prepare_terrain_map.py` | 每格低分位数 + 稳健迭代拟合二次曲面（RMS 0.05 m），障碍 = 高于地面 ≥ 0.08 m | 背景区、开阔场地的地面/障碍分类 |
+| `scripts/prepare_terrain_map.py` | 默认 `--ground-mode local`：每格低分位数 + 补洞 + 中值平滑（可跟随坡道）；`--ground-mode global` 才是旧的稳健二次曲面拟合（只能表达缓慢起伏，会把坡道面判成障碍） | 背景区、开阔场地的地面/障碍分类 |
 | `scripts/prepare_route_terrain.py` | **指定入口、方向和边界**的连续支撑层选择，逐列跟随上层薄表面，垂直面不当支撑，缺失格拒绝 | 三条指定通道（大坡、小洞、南洞） |
 
-输出：`_obstacles.pcd`（喂 SCAN）、`_surface.pcd`（地形表面，**仅 RViz 显示**）、
-`_ground.txt`（地面高度网格，供查询）、`_report.txt`（参数与统计）。
-两者都是**离线、定向**方法，不是通用地面分割。
+输出（两工具的报告扩展名不同）：
+`_obstacles.pcd`（喂 SCAN）、`_surface.pcd`（地形表面，**仅 RViz 显示**）、
+`_ground.txt`（地面高度网格，供查询）；
+`prepare_terrain_map.py` 写 `_report.txt`，`prepare_route_terrain.py` 写 `_report.json`。
+两者都是**离线、定向**方法，不是通用地面分割；旧全局曲面拟合的 RMS 等数值只保留在
+[归档全文](../archive/terrain_following_history.md)。
 
 ## 二、高度跟随链路
 
@@ -24,7 +30,7 @@
 | 运动模拟器 `go2_kinematic_sim` | `z = 地面(x,y) + body_height`（由地形推导，不抄轨迹 z） |
 | Mode 3 参考路线 | `make_terrain_route.py` 从同一网格写地面 z，SCAN 再加一次 `body_height` |
 | Mode 2 航点 | 生成器直接输出 `地面 + body_height`，SCAN 直接使用 |
-| Mode 1 RViz 目标 | 目标处地面 + `body_height`（`grid_map.ground_grid_file` 给出后） |
+| Mode 1 RViz 目标 | 加载 `ground_grid_file` 后 = 目标处地面 + `body_height`；**无网格时** = 收到初始 odom 时记录的高度 |
 | 轨迹控制点 | 优化**之后**、时间重分配之后再按新 XY 重赋地形 z（`PlannerManager::applyTerrainZToControlPoints`），越出网格即拒绝整条轨迹 |
 
 关键参数（`sentry_sim.launch.py`）：`ground_file`（仅显示）、`ground_grid_file`（高度查询）、

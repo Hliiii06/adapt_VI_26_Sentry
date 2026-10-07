@@ -26,7 +26,8 @@ Mode 2 有/无支撑面对照（见[无支撑面预览](../testing/mode2_waypoin
 
 ### 保留三种输入
 
-- Mode 1：RViz “2D Goal Pose”指定目标；保留原高度语义（目标处地面 + `body_height`）。
+- Mode 1：RViz “2D Goal Pose”指定目标。**加载 `ground_grid_file` 后**，目标高度 = 目标处地面 + `body_height`；
+  **未加载地面网格时**，沿用收到初始 odom 时记录的高度（`rviz_goal_height_`），不会自动获得坡顶高度。
 - Mode 2：参数配置多个航点（机体参考中心 XYZ）；不得在重写 launch 时遗漏。
 - Mode 3：输入带高度的参考路线；地面 z 与 `body_height` 只相加一次。
 

@@ -36,8 +36,8 @@
 
 | 脚本 | 用途 |
 |---|---|
-| `prepare_terrain_map.py` | 全局二次曲面地面分离（背景区），输出障碍云/地形表面/地面网格 |
-| `prepare_route_terrain.py` | 指定入口/方向/边界的连续支撑层选择（三条通道），输出网格与障碍 PCD |
+| `prepare_terrain_map.py` | 地面分离（背景区）：默认 `--ground-mode local`（局部低分位数 + 补洞 + 中值平滑），`global` 为旧二次曲面拟合；输出障碍云/地形表面/地面网格与 `_report.txt` |
+| `prepare_route_terrain.py` | 指定入口/方向/边界的连续支撑层选择（三条通道），输出网格/障碍 PCD 与 `_report.json` |
 | `make_test_maps.py` | 合成碰撞地图（封闭房间 + 带缺口隔墙） |
 | `make_terrain_maps.py` | 合成 10°/20°/30° 坡道 + 解析式地面网格 |
 | `make_tunnel_maps.py` | 可控洞口场景（高洞/低洞只差洞顶高度） |

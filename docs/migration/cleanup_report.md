@@ -107,7 +107,7 @@ GUI 验证口径统一为：**三条地形路线由用户确认；六航点最�
 
 | 项 | 方法 | 结果 |
 |---|---|---|
-| 本地链接 | 脚本遍历 `docs/**/*.md` 与根 markdown 的 `[..](..)` 本地目标 | **41 份文档 / 342 个本地链接 / 0 断链** |
+| 本地链接 | 脚本遍历 `docs/**/*.md` 与根 markdown 的 `[..](..)` 本地目标 | **41 份文档 / 346 个本地链接 / 0 断链**（含审查修正后复检） |
 | 代码围栏 | 检查每文件 ``` 计数为偶 | 0 个不平衡文件 |
 | 陈旧路径 | grep 旧路径（`testing/s3_results.md` 等） | 除归档页与 `build.md` 原始正文（已加横幅）外无残留 |
 | 代码未改 | `git diff --name-only HEAD -- src` | 空 |
@@ -132,3 +132,16 @@ GUI 验证口径统一为：**三条地形路线由用户确认；六航点最�
 - `inflation_analysis.md` 的正确约定计数未重算（原表作废）；如需要，应按
   `[p.z − z_up, p.z + z_down]` 重写一个可复现的核对脚本，再给出数值。
 - 未推送远端（本地领先，推送前仍需确认无敏感文件）。
+
+## 九、审查修正（对照 `37b22ac`）
+
+审查指出 2 处文档错误（P2）与 2 处小问题，均已按代码复核修正；本轮同样**只改文档**：
+
+| 问题 | 复核依据 | 修正 |
+|---|---|---|
+| Mode 1 高度语义被写成无条件地形跟随 | `scan_replan_fsm.cpp`：`ground_grid_file` 非空时 `terrain_following_=true`（56–60 行）；仅该分支用 `ground_map_.heightAt(...) + body_height_`（186–195 行），否则用首个 odom 记录的 `rviz_goal_height_`（436–438 行） | `plan.md` 列出有/无网格两种行为；`scan_planner.md` 差异表与能力边界、`implementation_report.md` 改动清单同步加条件；`terrain_following.md` 链路表加“无网格时”分支 |
+| “当前地形实现”引用旧算法 | `prepare_terrain_map.py`：`--ground-mode` 默认 `local`（低分位数 + 补洞 + 中值平滑，256–269 行），`global` 才是旧二次曲面拟合 | `terrain_following.md` 与 `scripts/README.md` 按实际默认改写；RMS 等旧数值只留归档 |
+| “地面点绝不能进占据栅格”过宽 | 无支撑面预览刻意保留原始地面点 | 限定为**贴地支撑面实验**；`terrain_following.md`、`validation_plan.md` 同时点明与无支撑面预览的区别 |
+| 报告扩展名混淆 | `prepare_terrain_map.py` 写 `_report.txt`（332 行）；`prepare_route_terrain.py` 写 `_report.json`（108 行） | `terrain_following.md`、`scripts/README.md` 按工具分别写明 |
+
+修正后复检：41 份文档 / 346 个本地链接 / 0 断链；代码围栏平衡；`src/` 与运行资产仍零改动。

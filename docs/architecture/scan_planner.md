@@ -14,7 +14,7 @@
 | odom 新鲜度 | 无超时（`have_odom` 一旦 true 保持） | `odom_timeout` 超时停车并遗忘轨迹 |
 | 轨迹时间 | 收到即 `exec_time = 0` | 按消息 `start_time` 对齐；过期/未来时间明确拒绝 |
 | 取消 | 无 `planning/reset` | FSM 与跟踪器订阅，本地立即锁止；`TaskAuthorization` 带 `task_id` |
-| 轨迹高度 | 局部起终点线性 z | 地面网格赋 z（优化后按新 XY 重赋），越出网格拒绝整条轨迹 |
+| 轨迹高度 | 局部起终点线性 z | **加载 `ground_grid_file` 后**：地面网格赋 z（优化后按新 XY 重赋），越出网格拒绝整条轨迹；未加载网格时仍为线性 z |
 
 详见[真实 PCD 路线修复](../testing/pcd_route_fix.md)与[地形与高度跟随](../testing/terrain_following.md)。
 
@@ -65,7 +65,7 @@ GridMap、FSM、PlannerManager 和优化库在一个 `scan_planner_node` 进程�
 - S3 `applyLinearZReference()` 按 XY 路径长度把局部起点/终点的高度插入初始化点。
 - S6 `AstarSearch()` 只枚举 dx/dy 邻居，用 `interpolateZIndexOnSearchPlane()` 决定 z。不能因使用 Vector3i 和三维数组，就称为任意 26 邻域三维搜索。
 - S7 `combineCostRebound()` / `combineCostRefine()` 的组合梯度中都有 `grad_3D.row(2).setZero()`。优化器数组有 xyz，不等于它会主动优化高度绕障。
-- Mode 1 上游把目标 z 设成收到的初始 body_pose 高度（**本仓库实施**：给出 `ground_grid_file` 时改为目标处地面 + `body_height`）。Mode 3 在参考路径 z 上加 `grid_map.body_height`（默认 0.4 m），按 0.5 m 三维距离降采样并保留末点，至少两个不同点。依据 `reference_path_utils.h`。
+- Mode 1 上游把目标 z 设成收到的初始 body_pose 高度（`rviz_goal_height_`，在收到首个 odom 时记录）。**本仓库实施**：仅当加载了 `grid_map.ground_grid_file`（`terrain_following_=true`）时改为目标处地面 + `body_height`；无网格时保持初始 odom 高度语义。Mode 3 在参考路径 z 上加 `grid_map.body_height`（默认 0.4 m），按 0.5 m 三维距离降采样并保留末点，至少两个不同点。依据 `reference_path_utils.h`。
 - 原生闭环只使用 XY 位置误差与 yaw，不控制 z；`go2_kinematic_sim` 保持 z 不变。
 - `open_loop_controller` 直接将三维轨迹求值结果发布为模拟里程计。跨层演示成功不能证明实车爬坡、车轮接地或跟踪能力。
 
