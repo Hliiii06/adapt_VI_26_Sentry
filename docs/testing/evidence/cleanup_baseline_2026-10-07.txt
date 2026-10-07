@@ -1,0 +1,91 @@
+# 整理任务基线快照（生成物，勿手改）
+# 生成时间: 2026-10-07T16:07:22+08:00
+# 生成命令: git status/diff 与参考仓库 rev-parse
+
+## 本仓库
+HEAD: 5bbc87b5c9b05d59e09bef900f67c995a30d244d
+分支: main  (origin/main ahead/behind: 0	0)
+
+## 参考仓库（只读）
+RM ../VI_26_Sentry: 7dfe71a5dbac8bd9b14cb618f0df960942611156
+RM status:
+## main...origin/main
+?? src/Sophus/
+?? src/hnurm_navigation/BRINGUP_LAUNCH_EXPLAINED.md
+SCAN2 ../../SCAN-Planner-Ros2: 103bce48bd9de783511d20e286c5e6299b79e47a
+SCAN2 status:
+## main...origin/main
+SCAN1 ../../SCAN-Planner: f12161392264e57590ae4aa00c24208c9e3b2a82
+SCAN1 status:
+ M src/planner/bspline_opt/src/bspline_optimizer.cpp
+ M src/planner/bspline_opt/src/uniform_bspline.cpp
+ M src/planner/plan_env/include/plan_env/grid_map.h
+ M src/planner/plan_manage/include/plan_manage/plan_container.hpp
+ M src/planner/plan_manage/src/planner_manager.cpp
+ M src/planner/plan_manage/src/scan_replan_fsm.cpp
+?? AGENTS.md
+?? PROJECT_CODE_READING_GUIDE.md
+
+## 整理前工作树（git status --porcelain）
+ M AGENTS.md
+ M README.md
+ M docs/README.md
+ M docs/architecture/target_architecture.md
+ M docs/interfaces/ros_topics.md
+ M docs/migration/decisions.md
+ M docs/migration/implementation_handoff.md
+ M docs/migration/plan.md
+ M docs/migration/progress.md
+ M docs/testing/codex_handoff_problems.md
+ M docs/testing/height_sweep.md
+ M scripts/make_terrain_route.py
+ M scripts/scenario.sh
+ M scripts/scenario_test.py
+ M src/planner/path_searching/CMakeLists.txt
+ M src/planner/path_searching/include/path_searching/dyn_a_star.h
+ M src/planner/path_searching/src/dyn_a_star.cpp
+ M src/planner/plan_manage/include/plan_manage/scan_replan_fsm.h
+ M src/planner/plan_manage/launch/sentry_sim.launch.py
+ M src/planner/plan_manage/src/scan_replan_fsm.cpp
+ M src/simulator/local_sensing/src/pointcloud_render_node.cpp
+?? docs/migration/cleanup_handoff.md
+?? docs/migration/real_robot_handoff.md
+?? docs/testing/evidence/cleanup_baseline_2026-10-07.txt
+?? docs/testing/evidence/pcd_route_fix.json
+?? docs/testing/maps/field/south_tunnel_roundtrip_mode2.yaml
+?? docs/testing/maps/field/south_tunnel_waypoint_z_mode2.yaml
+?? docs/testing/mode2_field_roundtrip.md
+?? docs/testing/mode2_waypoint_z_preview.md
+?? docs/testing/pcd_route_fix.md
+?? scripts/check_route_probe.py
+?? scripts/prepare_route_terrain.py
+?? scripts/probe_navigation.sh
+?? scripts/run_field_route.sh
+?? scripts/run_waypoint_z_preview.sh
+?? scripts/test_route_terrain.py
+?? scripts/test_waypoint_z_launch.py
+?? src/planner/path_searching/test/
+
+## 整理前 tracked diffstat
+ AGENTS.md                                          | 11 +++-
+ README.md                                          | 28 ++++++++---
+ docs/README.md                                     | 22 +++++---
+ docs/architecture/target_architecture.md           |  5 ++
+ docs/interfaces/ros_topics.md                      | 27 +++++++++-
+ docs/migration/decisions.md                        |  7 +++
+ docs/migration/implementation_handoff.md           |  4 ++
+ docs/migration/plan.md                             | 10 ++++
+ docs/migration/progress.md                         | 58 +++++++++++++++++++++-
+ docs/testing/codex_handoff_problems.md             |  3 ++
+ docs/testing/height_sweep.md                       |  5 ++
+ scripts/make_terrain_route.py                      |  5 +-
+ scripts/scenario.sh                                |  4 +-
+ scripts/scenario_test.py                           | 12 +++--
+ src/planner/path_searching/CMakeLists.txt          | 12 +++++
+ .../include/path_searching/dyn_a_star.h            |  5 +-
+ src/planner/path_searching/src/dyn_a_star.cpp      | 47 ++++++++++--------
+ .../include/plan_manage/scan_replan_fsm.h          |  3 +-
+ .../plan_manage/launch/sentry_sim.launch.py        | 41 +++++++++++++--
+ src/planner/plan_manage/src/scan_replan_fsm.cpp    |  5 +-
+ .../local_sensing/src/pointcloud_render_node.cpp   | 27 ++++++++--
+ 21 files changed, 283 insertions(+), 58 deletions(-)

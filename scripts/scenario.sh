@@ -212,7 +212,7 @@ start_sim() {
 echo "### 场景 ${SCENARIO}: navi_mode=${MODE} init=(${INIT_X}, ${INIT_Y}) ${EXTRA[*]:-}"
 
 if [[ "${SCENARIO}" == "odom_loss" ]]; then
-  start_sim
+  start_sim "$@"
   python3 scripts/scenario_test.py --scenario odom_loss --duration "${DUR}" --out "${OUT}" \
     --send-goal "${SEND_GOAL}" --cancel-after "${CANCEL_AFTER}" \
     ${INJECT_STALE:+--inject-stale} > "${OUT}_recorder.log" 2>&1 &
@@ -242,7 +242,7 @@ else
     ${INJECT_STALE:+--inject-stale} > "${OUT}_recorder.log" 2>&1 &
   REC_PID=$!
   sleep 1
-  start_sim
+  start_sim "$@"
   wait "${REC_PID}" || true
   tail -30 "${OUT}_recorder.log"
 

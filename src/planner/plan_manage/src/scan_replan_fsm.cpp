@@ -36,6 +36,9 @@ namespace scan_planner
 
     /*  fsm param  */
     navi_mode_ = load_parameter<int>(node_, "fsm.navi_mode", -1);
+    waypoint_reached_distance_ = load_parameter<double>(node_, "fsm.waypoint_reached_distance", 0.5);
+    if (!std::isfinite(waypoint_reached_distance_) || waypoint_reached_distance_ <= 0.0)
+      throw std::runtime_error("fsm.waypoint_reached_distance must be finite and positive");
     replan_thresh_ = load_parameter<double>(node_, "fsm.thresh_replan", -1.0);
     no_replan_thresh_ = load_parameter<double>(node_, "fsm.thresh_no_replan", -1.0);
     planning_horizon_ = load_parameter<double>(node_, "fsm.planning_horizon", -1.0);
@@ -752,7 +755,7 @@ namespace scan_planner
 
       if (isWaypointSequenceMode() &&
           current_wp_ + 1 < (int)active_waypoints_.size() &&
-          (end_pt_ - odom_pos_).norm() < 0.5)
+          (end_pt_ - odom_pos_).norm() < waypoint_reached_distance_)
       {
         current_wp_++;
         if (planNextWaypoint())

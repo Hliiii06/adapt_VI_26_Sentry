@@ -1,6 +1,11 @@
 # 架构调研入口
 
-记录日期：2026-10-01。范围：静态源码、launch、配置、消息与构建定义。本轮没有运行 ROS 节点、仿真或实车验证。用户确认当前 RM 配置已实车通过 RViz 2D goal 规划与行驶；该结论来源于用户验证，不是本轮测试。
+**当前任务（2026-10-07）**：暂停扩建仿真，先[整理代码与文档](migration/cleanup_handoff.md)，
+再做[I1/I2 实车数据影子接入](migration/real_robot_handoff.md)。尚未接管底盘，参考仓库只读。
+
+初始调研日期：2026-10-01，当时只做静态源码核对。后续已在实施副本构建并运行仿真；最新为
+2026-10-02 的 [真实 PCD 指定路线修复](testing/pcd_route_fix.md)及 2026-10-06 的六航点预览；当前转向影子接入规划。实车未验证。
+用户确认当前 RM 配置已实车通过 RViz 2D goal 规划与行驶；该结论来源于用户，不是 SCAN 测试结果。
 
 ## 版本基线
 
@@ -16,8 +21,14 @@ RM 保留未跟踪的 `src/Sophus/`、`src/hnurm_navigation/BRINGUP_LAUNCH_EXPLA
 
 ## 最新实施入口
 
-S0–S3 已在 `src/` 内实施，Codex 第一轮审查发现的 4 项缺陷已修正并补充受控碰撞场景，
-等待 **Codex 复审**；尚未接 VI_26_Sentry 实车，RViz 图形交互未验证。
+- [2026-10-06 Mode 2：关闭支撑面、六个 XYZ 航点](testing/mode2_waypoint_z_preview.md)：原始 PCD 三维轨迹预览，不是轮地接触或速度闭环验证。
+
+- [2026-10-06 Mode 2：真实洞口与坡道往返](testing/mode2_field_roundtrip.md)：自动过洞、上坡、折返下坡并返回；保留支撑面，诊断车高 0.10 m。
+
+S0–S3 及后续修正已在 `src/` 内实施。最新已打通指定真实坡道及降低高度后的两个洞口；
+尚未接 VI_26_Sentry 实车，RViz 图形交互未验证。
+
+- **[最新：真实 PCD 路线修复与启动入口](testing/pcd_route_fix.md)**：已确认原因、改动、正反例与限制。
 
 - [S0 基线](migration/s0_baseline.md)：PCD 分析、机器人/外参/限速输入、坐标系与高度约定。
 - [实施报告](migration/implementation_report.md)：相对上游 `103bce4` 的改动清单、理由，
@@ -25,10 +36,9 @@ S0–S3 已在 `src/` 内实施，Codex 第一轮审查发现的 4 项缺陷已�
 - [S3 结果](testing/s3_results.md)：受控碰撞场景矩阵、三模式与失效停止实测数据、
   独立净空检查、上一轮缺陷与修正、未验证项。
 - **[Codex 交接：真实 PCD 下过不去斜坡与洞口](testing/codex_handoff_problems.md)** ——
-  已知事实、未解问题（按嫌疑排序）、执行方犯过的错误、建议优先实验。**接手先看这份。**
+  原始交接问题与假设，保留追溯；部分归因已由最新修复报告取代。
 - [降低高度做可通行性排查](testing/height_sweep.md)：新增 `robot_height` 单一旋钮；
-  低洞扫描显示 H=0.25 几何上过不去、H=0.10 几何上能过但规划器仍 `A-star failed`，
-  即"降高度可分离几何与规划器问题"。
+  记录修复前高度扫描；H=0.10 失败已在本轮解决，旧窄通道归因不再适用。
 - [z 向膨胀参数核对与实测](testing/inflation_analysis.md)：上游 `advanced_param.xml`
   确为 up=0.1 / down=0.4；实测减小 down 对过洞无效（阻挡点在机体中心上方），
   有效的是 up；并记录我先前"上游没有这两个参数"的错误结论及其原因。

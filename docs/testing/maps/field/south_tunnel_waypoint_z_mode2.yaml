@@ -1,0 +1,20 @@
+# NO ground grid. Six body-reference XYZ goals, world frame, metres.
+# Raw PCD, no terrain separation. Diagnostic R=0.26, H=0.10 cylinder.
+# These heights intentionally leave clearance above the raw floor/ramp:
+# body centre is approximately 0.15 m above the surface, NOT H/2.
+# This is a floating trajectory/collision preview, not wheel-ground contact.
+# Start (1.9,-6,0.17); pass tunnel -> ascend -> plateau -> descend -> exit.
+/sentry_sim/scan_planner_node:
+  ros__parameters:
+    fsm.navi_mode: 2
+    fsm.waypoint_reached_distance: 0.10
+    # Finish the existing short segment near its end rather than repeatedly
+    # requesting a new <0.2 m trajectory which PlannerManager rejects.
+    fsm.thresh_no_replan: 0.5
+    fsm.waypoints:
+      [ 0.20, -6.00, 0.170,
+       -0.80, -6.00, 0.370,
+       -1.70, -6.00, 0.370,
+       -0.80, -6.00, 0.370,
+        0.20, -6.00, 0.170,
+        1.90, -6.00, 0.170]

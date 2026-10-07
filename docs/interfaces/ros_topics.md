@@ -120,6 +120,31 @@ uint32 task_id
 ### 高度相关话题的边界（重要）
 
 `ground_surface` / `terrain_surface_mesh` / `body_marker` **仅用于 RViz 显示**。
-地面点**绝不能**进入 SCAN 的占据栅格（否则地板本身即障碍）；
+在贴地支撑面实验中，地面点不能当成机体障碍进入占据栅格；
+下述无支撑面预览则刻意保留原始地面，以离地圆柱检查三维净空，不代表贴地通行。
 地形高度通过地面高度**网格文件**（`ground_grid_file`）提供给运动模拟器与规划器，
 不通过话题。详见 [地形与高度跟随](../testing/terrain_following.md)。
+
+### 2026-10-02 模拟点云几何修复
+
+`pcl_render_node` 增加参数 `preserve_map_geometry`（节点默认 false，sentry launch 默认 true），
+静态返回改用选中的降采样地图点 XYZ，避免角度格反算虚增洞顶厚度。
+没有新增/改名 topic，没有改变 type、publisher/subscriber、QoS、frame、时间戳来源、频率或 TF。
+变化是模拟点云的几何内容，不是实车感知协议；可见性仍近似。
+地形支撑层继续通过离线网格文件提供。见 [本轮证据及限制](../testing/pcd_route_fix.md)。
+
+### 2026-10-06 可选 waypoint_z_preview（仅 Mode 2 诊断）
+
+默认闭环接口不变。此可选模式不启动 `closed_loop_controller`、`go2kinematicsim`，
+只由已有 `open_loop_controller` 生成模拟 odom，无实车连接。
+
+| 话题 | 类型 | 发布 → 订阅 | QoS | frame/时间戳/频率 |
+|---|---|---|---|---|
+| `/sentry_sim/body_pose` | `nav_msgs/msg/Odometry` | open_loop_controller → SCAN FSM/GridMap、雷达渲染、记录器 | 发布 Reliable/Volatile/KeepLast 20；订阅保持原样 | world → base；节点系统时钟 now；100 Hz；twist 为 world 系导数 |
+| `/sentry_sim/planning/bspline` | `scan_planner_msgs/msg/Bspline` | SCAN → open_loop_controller（取代闭环跟踪器） | Reliable/Volatile/KeepLast 10 | world 坐标控制点；规划器 start_time；成功规划事件触发 |
+
+本模式无 `cmd_vel` 发布者；积分器的 `body_marker`、`path` 也不发布。
+规划器原有 `self_inflation` 包络显示不变。TF 名称、发布器与频率不变，
+仅其依赖的 odom 位姿源从速度积分改为样条求值。
+开环执行器不消费 `planning/task_active` 授权或 `planning/reset` 取消；终止实验用 Ctrl-C。
+详见[模式边界、六航点与证据](../testing/mode2_waypoint_z_preview.md)。

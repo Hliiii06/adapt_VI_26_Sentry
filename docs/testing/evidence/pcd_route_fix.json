@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-02",
+  "implementation_base": "5bbc87b plus this working-tree patch",
+  "reference_rm": "7dfe71a5dbac8bd9b14cb618f0df960942611156",
+  "reference_scan2": "103bce48bd9de783511d20e286c5e6299b79e47a",
+  "source_pcd": "rmuc2026_field.pcd",
+  "source_sha256": "ebc0add17e2a229abed880926f4f01baf89ca9a8fe7a34d80b8b2b07b986adc7",
+  "background_pcd": "docs/testing/maps/field/rmuc2026_local_obstacles.pcd",
+  "background_sha256": "40525d6f0fbee1392c495a35f32dda23d6d7b0ebde35dfe08fe87912249d0c80",
+  "robot_radius": 0.26,
+  "mode": 1,
+  "preserve_map_geometry": true,
+  "runs": [
+    {
+      "id": "field_ramp_bg_final",
+      "map_prefix": "log/probes/terrain/large_ramp_bg",
+      "start": [6.5, 4.2], "goal": [9.0, 4.2], "height": 0.25,
+      "goal_error": 0.0008079130762936343,
+      "rise": 0.2, "frames": 2633, "duration": 26.319742918014526,
+      "collision_frames": 0, "passed": true
+    },
+    {
+      "id": "field_small_tunnel_bg_h010",
+      "map_prefix": "log/probes/terrain/small_tunnel_bg",
+      "start": [4.7, 4.1], "goal": [4.7, 6.1], "height": 0.10,
+      "goal_error": 0.003540461344100913,
+      "rise": 0.16, "frames": 2434, "duration": 24.325183153152466,
+      "collision_frames": 0, "passed": true
+    },
+    {
+      "id": "field_south_tunnel_bg_h010",
+      "map_prefix": "log/probes/terrain/south_tunnel_bg",
+      "start": [1.6, -6.0], "goal": [-1.5, -6.0], "height": 0.10,
+      "goal_error": 0.00831251617653761,
+      "rise": 0.20, "frames": 2432, "duration": 24.315635442733765,
+      "collision_frames": 0, "passed": true
+    },
+    {
+      "id": "field_small_tunnel_bg_h025", "height": 0.25,
+      "map_prefix": "log/probes/terrain/small_tunnel_bg",
+      "expected": "refuse", "command_samples": 2233,
+      "observed_seconds_rounded": 22.32, "nonzero_commands": 0,
+      "goal_accepted_by_fsm": true, "passed": true
+    },
+    {
+      "id": "field_south_tunnel_bg_h025", "height": 0.25,
+      "map_prefix": "log/probes/terrain/south_tunnel_bg",
+      "expected": "refuse", "command_samples": 2232,
+      "observed_seconds_rounded": 22.31, "nonzero_commands": 0,
+      "goal_accepted_by_fsm": true, "passed": true
+    },
+    {
+      "id": "low_geometry_final", "height": 0.10,
+      "obstacles": "docs/testing/maps/tunnel/tunnel_low.pcd",
+      "start": [0, -2], "goal": [0, 7],
+      "goal_error": 0.005216720860481416,
+      "rise": 0.54596, "drop": 0.54596,
+      "frames": 4236, "duration": 42.34848976135254,
+      "collision_frames": 0, "passed": true
+    }
+  ],
+  "targeted_regressions": {
+    "build": "9 packages succeeded; existing warnings remain",
+    "ctest_search_regression": "passed: empty-map dz 0, +0.20, -0.20, -0.35",
+    "python_terrain_tests": "6 passed",
+    "gap_edge": "passed: no movement, target sent, A-star collision rejection",
+    "full_historical_suite_rerun": false
+  },
+  "raw_roof_retention_checks": [
+    {"map": "small_tunnel_bg", "xy_box": [4.4, 5.0, 5.0, 5.45], "z_above": 0.4, "points": 360, "removed": 0},
+    {"map": "south_tunnel_bg", "xy_box": [0.7, 1.1, -6.2, -5.8], "z_above": 0.2, "points": 210, "removed": 0}
+  ],
+  "evidence_location": "log/probes/<id>/{launch_args.txt,launch.log,run.csv,run_cmdvel.csv,check.json where applicable}; logs/maps ignored by git",
+  "limitations": [
+    "Collision replay is conditional on the processed obstacle classification, not raw physical ground truth.",
+    "Bounded, explicitly seeded support corridors only; no whole-field multi-layer planner.",
+    "A 0.10 m diagnostic robot is not proof that the 0.25 m physical vehicle fits.",
+    "No wheel-contact, traction or dynamic climbing validation; RViz GUI and real robot not tested.",
+    "Earlier field_ramp_final failed clearance against its original boundary map; only field_ramp_bg_final is accepted here.",
+    "Existing renderer abnormal shutdown logs remain unresolved."
+  ]
+}

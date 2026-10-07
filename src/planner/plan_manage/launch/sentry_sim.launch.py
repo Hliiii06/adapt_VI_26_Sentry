@@ -1,6 +1,6 @@
 """全向哨兵 SCAN 闭环仿真入口（PCD 地图 + RViz）。
 
-数据流（真正的速度闭环，不是把样条位姿直接写进 odom）：
+默认 closed_loop 数据流（速度闭环）：
 
     PCD 地图 ──> 局部雷达渲染 ──> SCAN 地图/规划 ──> 全向跟踪速度
         ▲                                                    │
@@ -8,6 +8,9 @@
 
 所有节点都在 /sentry_sim 命名空间下，cmd_vel 只出现在该命名空间内，
 不会与 RM 的 /cmd_vel 或实车 UART 产生任何连接。
+
+可选 waypoint_z_preview 仅用于 Mode 2 无支撑面诊断：直接将样条位姿
+写入模拟 odom，不启动速度跟踪/积分器，不验证轮地接触或动力学。
 
 三种输入模式与上游一致，通过 navi_mode 选择：
     1  RViz "2D Goal Pose" 指定目标
@@ -19,7 +22,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -97,6 +100,11 @@ def _setup(context):
     start_rviz = _as_bool(LaunchConfiguration("start_rviz").perform(context))
     ground_grid_file = os.path.expanduser(LaunchConfiguration("ground_grid_file").perform(context))
     ground_file = os.path.expanduser(LaunchConfiguration("ground_file").perform(context))
+    execution_mode = LaunchConfiguration("execution_mode").perform(context)
+    if execution_mode not in ("closed_loop", "waypoint_z_preview"):
+        raise RuntimeError("execution_mode must be closed_loop or waypoint_z_preview")
+    if execution_mode == "waypoint_z_preview" and (ground_grid_file or ground_file):
+        raise RuntimeError("waypoint_z_preview forbids ground_grid_file/ground_file: no support surface")
     robot_radius = float(LaunchConfiguration("robot_radius").perform(context))
     # robot_height 是唯一的高度旋钮：机体高 H -> 机体中心离地 H/2，
     # 碰撞包络上下各 H/2（查询点在机体中心）。inflation_z_* 留空时自动取 H/2，
@@ -153,7 +161,9 @@ def _setup(context):
             name="pcl_render_node",
             namespace=NAMESPACE,
             output="screen",
-            parameters=[simulator_yaml, common],
+            parameters=[simulator_yaml, common, {
+                "preserve_map_geometry": _as_bool(LaunchConfiguration("preserve_map_geometry").perform(context)),
+            }],
             remappings=[("global_map", "/%s/global_cloud" % NAMESPACE)],
         )
     )
@@ -190,6 +200,7 @@ def _setup(context):
     )
 
     # 4) 全向跟踪器：输出机体系 vx/vy 与 yaw rate
+    execution_start = len(nodes)
     nodes.append(
         Node(
             package="scan_planner",
@@ -218,6 +229,23 @@ def _setup(context):
                          "robot_radius": robot_radius, "body_height": half_h}],
         )
     )
+
+    if execution_mode == "waypoint_z_preview":
+        if navi_mode != 2 or yaw_mode != "hold":
+            raise RuntimeError("waypoint_z_preview requires Mode 2 and yaw_mode=hold")
+        # Replace BOTH velocity tracker and integrator: exactly one odom source.
+        del nodes[execution_start:]
+        nodes.append(LogInfo(msg="WAYPOINT-Z PREVIEW: no ground grid, direct spline odometry; "
+                                 "NOT wheel-contact/velocity-tracking validation. Stop with Ctrl-C."))
+        nodes.append(Node(
+            package="scan_planner", executable="open_loop_controller",
+            name="open_loop_controller", namespace=NAMESPACE, output="screen",
+            parameters=[common, {"frame_id": "world", "child_frame_id": "base",
+                "init_x": init_x, "init_y": init_y, "init_z": init_z,
+                "init_yaw": init_yaw, "publish_rate": 100.0,
+                # Existing controller holds yaw below this speed threshold.
+                "yaw_min_speed": 1.0e6, "hold_final_position": True}],
+        ))
 
     # 6) Mode 3 的参考路线发布器
     if navi_mode == 3:
@@ -254,6 +282,8 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "navi_mode", default_value="1",
                 description="1=RViz 目标, 2=参数航点, 3=参考路线"),
+            DeclareLaunchArgument("execution_mode", default_value="closed_loop",
+                description="closed_loop=速度闭环；waypoint_z_preview=无地面网格的三维样条位姿预览，非物理仿真"),
             DeclareLaunchArgument(
                 "pcd_map_file", default_value="~/pcd_map/rmuc2026_field.pcd",
                 description="用户提供的 PCD 地图路径"),
@@ -271,7 +301,8 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ground_grid_file", default_value="",
                 description="地面高度网格（prepare_terrain_map.py / make_terrain_maps.py 产出）。"
-                            "给出后运动模拟器与 Mode 1 目标高度都跟随地形；留空则 z 固定"),
+                            "给出后运动模拟器与 Mode 1 目标高度都跟随地形；"
+                            "留空时 closed_loop 固定 z，waypoint_z_preview 按样条 z"),
             DeclareLaunchArgument(
                 "ground_file", default_value="",
                 description="地形表面点云，仅用于 RViz 显示地形起伏"),
@@ -293,6 +324,8 @@ def generate_launch_description():
                 description="额外发布未过滤的对照云 /sentry_sim/global_cloud_raw"),
             DeclareLaunchArgument("keypoints_file", default_value="",
                                   description="navi_mode=2 的航点参数 YAML"),
+            DeclareLaunchArgument("preserve_map_geometry", default_value="true",
+                                  description="局部观测保留源点位置，避免极坐标补点凭空加厚洞顶；非真实雷达噪声模型"),
             DeclareLaunchArgument("reference_path_file", default_value="",
                                   description="navi_mode=3 的参考路线参数 YAML"),
             DeclareLaunchArgument("yaw_mode", default_value="hold",

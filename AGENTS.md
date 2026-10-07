@@ -1,6 +1,10 @@
 # 迁移工作区指南
 
-这是 ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 及其他算法迁移的调研工作区。当前阶段为 **独立 SCAN 全向适配与仿真交接规划**；先仿真并审查，再接 RM。
+这是 ROS 2 全向哨兵机器人从 Nav2 向 SCAN-Planner 及其他算法迁移的工作区。2026-10-07 用户决定**暂停扩建仿真，进入仓库整理与 I1/I2 实车数据影子接入准备**；尚未授权底盘输出或实车运行。
+
+当前交接优先级高于下文历史阶段描述：先执行[整理指引](docs/migration/cleanup_handoff.md)，
+再按[实车影子接入交接](docs/migration/real_robot_handoff.md)开发；实施仍在本仓库，RM 和 SCAN 参考仓库继续只读。
+保留已有仿真作回归，不扩展 Gazebo，不把无支撑面的开环航点预览接到实车。
 
 ## 范围与源码
 
@@ -13,6 +17,11 @@
 - 当前阶段：**S0–S3 已实施；地形分离与高度跟随、Codex 两轮审查的修正、受控洞口场景（高洞过/低洞拒）、RViz 实体显示、真实场地三处坐标核对均已完成；第二轮复审的 4 项实现问题（优化后才赋地形高度、显示与包络几何一致、取消立即本地锁止、越界拒绝）已修正**，尚未接入 VI_26_Sentry 实车。RViz 图形交互在本环境无法验证。实施入口见 [实施报告](docs/migration/implementation_report.md)，测试证据见 [S3 结果](docs/testing/s3_results.md)，地形见 [地形与高度跟随](docs/testing/terrain_following.md)，洞口与真实场地核对见 [真实场地地形核对](docs/testing/field_terrain_check.md)。
 
 用户最新确认：三维导航指 SCAN 当前的三维占据/空间避障与参考高度实现，不要求自由三维或完整地形通行规划；现有 RM 配置已由用户验证 RViz 2D goal 规划并驱动实车；小陀螺部分由电控负责，仓库相关源码不代表实际执行路径。C 方向已认可，实施结果见 [实施报告](docs/migration/implementation_report.md)。
+
+2026-10-02 最新：用户批准先打通指定洞口与坡道的有界支撑层选择；已修复 A* 下坡取整与模拟雷达虚增洞顶厚度。
+真实大坡 H=0.25 m、两洞 H=0.10 m 已闭环通过；两洞 H=0.25 m 仍拒绝，不得宣称实车可通过。
+后续接手优先读 [真实 PCD 修复与入口](docs/testing/pcd_route_fix.md)，其中结果取代旧的最低层/窄通道归因。
+不扩大 Gazebo 或全场多层规划，不改 RM；默认真实尺寸与诊断缩小尺寸必须明确区分。
 
 最新实施顺序与交付边界以 [实施计划](docs/migration/plan.md)和 [harness 交接说明](docs/migration/implementation_handoff.md)为准：保留三种模式，适配 odom 朝向、全向跟踪和碰撞检查；用用户 PCD 完成 RViz 闭环运动仿真，再审查、再接入 VI_26_Sentry。
 

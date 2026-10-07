@@ -65,8 +65,9 @@ class Ground:
         self.cell, self.x0, self.y0, self.nx, self.ny, self.v = load_ground_grid(path)
 
     def at(self, x, y):
-        fx = (x - self.x0) / self.cell - 0.5
-        fy = (y - self.y0) / self.cell - 0.5
+        # x0/y0 are sample coordinates, not lower cell edges (same as C++).
+        fx = min(max((x - self.x0) / self.cell, 0.0), self.nx - 1)
+        fy = min(max((y - self.y0) / self.cell, 0.0), self.ny - 1)
         i0 = max(0, min(int(math.floor(fx)), self.nx - 1))
         j0 = max(0, min(int(math.floor(fy)), self.ny - 1))
         i1 = min(i0 + 1, self.nx - 1)

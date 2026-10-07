@@ -18,6 +18,18 @@ target_include_directories(path_searching PUBLIC
 ament_target_dependencies(path_searching plan_env rclcpp)
 target_link_libraries(path_searching Eigen3::Eigen)
 
+if(BUILD_TESTING)
+  enable_testing()
+  add_executable(search_regression test/search_regression.cpp)
+  target_link_libraries(search_regression path_searching)
+  ament_target_dependencies(search_regression plan_env rclcpp)
+  add_test(NAME search_regression COMMAND search_regression --ros-args --params-file
+    ${CMAKE_CURRENT_SOURCE_DIR}/../plan_manage/config/sentry_planner.yaml)
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test_ros_home)
+  set_tests_properties(search_regression PROPERTIES ENVIRONMENT
+    "ROS_DOMAIN_ID=73;ROS_LOCALHOST_ONLY=1;ROS_HOME=${CMAKE_CURRENT_BINARY_DIR}/test_ros_home")
+endif()
+
 install(TARGETS path_searching EXPORT export_path_searching
   ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)

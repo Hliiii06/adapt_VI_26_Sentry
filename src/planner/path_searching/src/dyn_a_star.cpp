@@ -93,9 +93,11 @@ vector<GridNodePtr> AStar::retrievePath(GridNodePtr current)
 
 bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d end_pt, Vector3i &start_idx, Vector3i &end_idx)
 {
+    // 检查索引说否越界
     if (!Coord2Index(start_pt, start_idx) || !Coord2Index(end_pt, end_idx))
         return false;
 
+    // 方向向量
     Eigen::Vector3d start_to_end = end_pt - start_pt;
     if (start_to_end.norm() < 1e-6)
         return false;
@@ -108,6 +110,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
         //ROS_WARN("Start point is insdide an obstacle.");
         do
         {
+            // 向终点前进一i个步长，检测这个起点是否合法
             start_pt -= start_to_end * step_size_;
             if (!Coord2Index(start_pt, start_idx))
                 return false;
@@ -121,6 +124,7 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
         } while (occ);
     }
 
+    // 检查终点是否合法
     occ = checkOccupancy(Index2Coord(end_idx), path_yaw);
     if (occ)
     {
@@ -153,6 +157,7 @@ ASTAR_RET AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d
     center_ = (start_pt + end_pt) / 2;
 
     Vector3i start_idx, end_idx;
+    // 检查起点终点
     if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
     {
         RCLCPP_ERROR(rclcpp::get_logger("path_searching"),
@@ -176,7 +181,7 @@ ASTAR_RET AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d
         ratio = std::max(0.0, std::min(1.0, ratio));
 
         const double z = search_start(2) + ratio * (search_end(2) - search_start(2));
-        return static_cast<int>((z - center_(2)) * inv_step_size_ + 0.5) + CENTER_IDX_(2);
+        return static_cast<int>(std::floor((z - center_(2)) * inv_step_size_ + 0.5)) + CENTER_IDX_(2);
     };
 
     // if ( start_pt(0) > -1 && start_pt(0) < 0 )

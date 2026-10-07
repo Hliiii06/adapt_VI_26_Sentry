@@ -92,6 +92,7 @@ bool has_global_map(false);
 bool has_local_map(false);
 bool has_odom(false);
 bool has_dyn_map(false);
+bool preserve_map_geometry = false;
 
 nav_msgs::msg::Odometry odom_;
 Eigen::Matrix4d sensor2body, sensor2world;
@@ -1425,6 +1426,7 @@ shared(pattern_matrix, polar_matrix, cloud_all_map, pointIdxRadiusSearch,       
         {
 
           polar_matrix(cen_theta_index, cen_fi_index) = polar_pt.r;
+          polarindex_matrix(cen_theta_index, cen_fi_index) = fov_pointsindex[i];
           polarindextype_matrix(cen_theta_index, cen_fi_index) = 0;
           allowblur_matrix(cen_theta_index, cen_fi_index) = 0;
           // polarindex_matrix(cen_theta_index,cen_fi_index) = pointIdxRadiusSearch[i];
@@ -1671,6 +1673,7 @@ shared(culling_kdindex,                                                         
                   if (polar_matrix(theta_index_o, fi_index_o) > inter_point.norm())
                   {
                     polar_matrix(theta_index_o, fi_index_o) = inter_point.norm();
+                    polarindex_matrix(theta_index_o, fi_index_o) = point_index;
                     polarindextype_matrix(theta_index_o, fi_index_o) = 2;
 
                     // limit curvature, avoid a good plane to be interlined
@@ -1789,6 +1792,17 @@ shared(use_avia_pattern, use_vlp32_pattern, use_minicf_pattern, is_360lidar,    
           add_pcl_pt.x = addeuc_pt(0);
           add_pcl_pt.y = addeuc_pt(1);
           add_pcl_pt.z = addeuc_pt(2);
+          // Polar-bin filling otherwise turns one map point into a spherical
+          // patch, inventing returns below a tunnel roof. Geometry diagnostics
+          // retain the selected source point (visibility remains approximate).
+          const int source_index = polarindex_matrix(i, j);
+          if (preserve_map_geometry && polarindextype_matrix(i, j) != 4 &&
+              source_index >= 0 && source_index < origin_mapptcount)
+          {
+            add_pcl_pt.x = cloud_all_map.points[source_index].x;
+            add_pcl_pt.y = cloud_all_map.points[source_index].y;
+            add_pcl_pt.z = cloud_all_map.points[source_index].z;
+          }
           // add_pcl_pt.intensity = polarindextype_matrix(i, j) * 20;
 
           add_pcl_pt.intensity = polarpointintensity_matrix(i, j);
@@ -2014,6 +2028,9 @@ int main(int argc, char **argv)
   vertical_fov = ros_node->declare_parameter<double>("vertical_fov", 90.0);
   min_raylength = ros_node->declare_parameter<double>("min_raylength", 1.0);
   downsample_res = ros_node->declare_parameter<double>("downsample_res", 0.1);
+  preserve_map_geometry = ros_node->declare_parameter<bool>("preserve_map_geometry", false);
+  RCLCPP_INFO(ros_node->get_logger(), "Lidar preserve_map_geometry=%s (source points, approximate visibility)",
+              preserve_map_geometry ? "true" : "false");
   livox_linestep = ros_node->declare_parameter<double>("livox_linestep", 1.4);
   use_avia_pattern = ros_node->declare_parameter<int>("use_avia_pattern", 0);
   curvature_limit = ros_node->declare_parameter<double>("curvature_limit", 100.0);

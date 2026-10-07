@@ -175,6 +175,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--duration", type=float, default=25.0)
+    parser.add_argument("--odom-only", action="store_true",
+                        help="Explicit trajectory-preview recording: require odom, not cmd_vel; NOT a tracking test")
     parser.add_argument("--goal-x", type=float, default=-6.0)
     parser.add_argument("--goal-y", type=float, default=7.5)
     parser.add_argument("--out", required=True)
@@ -192,20 +194,21 @@ def main():
     rclpy.init()
     node = Recorder(args)
 
-    print("[recorder] 等待 cmd_vel 与 body_pose ...")
+    print("[recorder] 等待 body_pose ..." if args.odom_only
+          else "[recorder] 等待 cmd_vel 与 body_pose ...")
     deadline = time.time() + 60.0
     while time.time() < deadline and rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.05)
-        if node.cmd_samples and node.samples:
+        if node.samples and (args.odom_only or node.cmd_samples):
             break
-    if not node.samples or not node.cmd_samples:
+    if not node.samples or (not args.odom_only and not node.cmd_samples):
         print("[recorder] 超时：未收到 body_pose / cmd_vel")
         node.destroy_node()
         rclpy.shutdown()
         return 1
     print("[recorder] 已上线，cmd_vel 样本=%d" % len(node.cmd_samples))
 
-    deadline = time.time() + 20.0
+    deadline = time.time() + (0.0 if args.odom_only else 20.0)
     while time.time() < deadline and rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.05)
         if node.goal_pub.get_subscription_count() > 0:
@@ -258,6 +261,7 @@ def main():
         w.writerows(node.cmd_samples)
     with open(args.out + "_meta.txt", "w") as f:
         f.write("scenario=%s\n" % args.scenario)
+        f.write("odom_only=%s\n" % args.odom_only)
         f.write("t0_epoch=%.6f\n" % (node.t0_epoch or 0.0))
         if node.cancel_t is not None:
             f.write("cancel_t=%.6f\n" % node.cancel_t)
