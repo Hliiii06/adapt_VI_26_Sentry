@@ -93,6 +93,10 @@ struct MappingParameters {
   string sensor_type_;
   bool cloud_is_world_;
   bool need_extrinsic_;
+  // 可选：要求点云与其射线原点按消息时间戳配对（真实传感器输入用）。
+  // 默认 false，保持仿真的"各自缓存最新值"行为不变。
+  bool strict_sensor_pairing_;
+  double sensor_pairing_tolerance_;
   Eigen::Matrix4d lidar_extrinsic_;
   Eigen::Matrix4d depth_extrinsic_;
 
@@ -126,6 +130,9 @@ struct MappingData {
   bool use_cloud_update_;
   bool has_first_depth_;
   bool has_ray_pose_, has_cloud_;
+  // 射线原点对应的时间戳（秒），用于严格配对检查
+  bool has_ray_stamp_;
+  double ray_stamp_;
 
   // depth image projected point cloud
 

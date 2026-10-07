@@ -54,6 +54,9 @@ public:
     future_time_tolerance_ = declare_parameter<double>("future_time_tolerance", 0.05);
     allow_missing_start_time_ = declare_parameter<bool>("allow_missing_start_time", false);
     require_task_authorization_ = declare_parameter<bool>("require_task_authorization", true);
+    // 影子接入：不透传 yaw 候选（MCU 保留朝向所有权）。默认 true 保持仿真行为不变，
+    // 也不把 wz 偷塞进 linear.z —— 只是把 angular.z 置零。
+    yaw_candidate_enabled_ = declare_parameter<bool>("yaw_candidate_enabled", true);
 
     if (yaw_mode_ != "hold" && yaw_mode_ != "align" && yaw_mode_ != "spin")
       throw std::runtime_error("yaw_mode must be 'hold', 'align' or 'spin'");
@@ -85,10 +88,12 @@ public:
                 "Omnidirectional closed-loop tracker ready: yaw_mode=%s, "
                 "vx=%.2f, vy=%.2f, wz=%.2f, odom_timeout=%.2fs, "
                 "trajectory age limit=%.2fs (older/future trajectories are rejected), "
-                "require_task_authorization=%s, allow_missing_start_time=%s",
+                "require_task_authorization=%s, allow_missing_start_time=%s, "
+                "yaw_candidate_enabled=%s",
                 yaw_mode_.c_str(), max_vx_, max_vy_, max_vyaw_, odom_timeout_,
                 start_time_align_limit_, require_task_authorization_ ? "true" : "false",
-                allow_missing_start_time_ ? "true" : "false");
+                allow_missing_start_time_ ? "true" : "false",
+                yaw_candidate_enabled_ ? "true" : "false");
   }
 
 private:
@@ -118,7 +123,7 @@ private:
   void publishStop(double yaw_rate = 0.0)
   {
     geometry_msgs::msg::Twist cmd;
-    cmd.angular.z = std::clamp(yaw_rate, -max_vyaw_, max_vyaw_);
+    cmd.angular.z = yaw_candidate_enabled_ ? std::clamp(yaw_rate, -max_vyaw_, max_vyaw_) : 0.0;
     cmd_vel_pub_->publish(cmd);
   }
 
@@ -424,6 +429,9 @@ private:
     if (exec_time_ >= traj_duration_ && pos_error.norm() < finish_dist_)
       command = geometry_msgs::msg::Twist();
 
+    if (!yaw_candidate_enabled_)
+      command.angular.z = 0.0;
+
     publishExecutionFrozen(false);
     cmd_vel_pub_->publish(command);
   }
@@ -439,6 +447,7 @@ private:
   bool task_active_{false};
   bool allow_missing_start_time_{false};
   bool require_task_authorization_{true};
+  bool yaw_candidate_enabled_{true};
   rclcpp::TimerBase::SharedPtr cmd_timer_;
   bool receive_traj_{false};
   bool have_odom_{false};

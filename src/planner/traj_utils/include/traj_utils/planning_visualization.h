@@ -22,6 +22,13 @@ namespace scan_planner
     using MarkerPublisher = rclcpp::Publisher<visualization_msgs::msg::Marker>;
     using MarkerArrayPublisher = rclcpp::Publisher<visualization_msgs::msg::MarkerArray>;
     rclcpp::Node *node_{nullptr};
+    // 可配置的 marker frame：为空时保持上游硬编码（world/map），
+    // 影子接入时设为规划系（如 odom），避免显示与规划系不一致。
+    std::string frame_override_;
+    std::string frameId(const std::string &legacy) const
+    {
+      return frame_override_.empty() ? legacy : frame_override_;
+    }
 
     MarkerPublisher::SharedPtr goal_point_pub;
     MarkerPublisher::SharedPtr global_list_pub;

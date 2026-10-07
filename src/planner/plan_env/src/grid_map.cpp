@@ -65,6 +65,8 @@ void GridMap::initMap(rclcpp::Node *node)
   load_parameter(node_, "grid_map.sensor_type", mp_.sensor_type_, string("lidar"));
   load_parameter(node_, "grid_map.cloud_is_world", mp_.cloud_is_world_, true);
   load_parameter(node_, "grid_map.need_extrinsic", mp_.need_extrinsic_, true);
+  load_parameter(node_, "grid_map.strict_sensor_pairing", mp_.strict_sensor_pairing_, false);
+  load_parameter(node_, "grid_map.sensor_pairing_tolerance", mp_.sensor_pairing_tolerance_, 0.05);
 
   mp_.lidar_extrinsic_ <<
       1.0, 0.0, 0.0, -0.01100,
@@ -179,6 +181,8 @@ void GridMap::initMap(rclcpp::Node *node)
   md_.has_first_depth_ = false;
   md_.has_ray_pose_ = false;
   md_.has_cloud_ = false;
+  md_.has_ray_stamp_ = false;
+  md_.ray_stamp_ = 0.0;
   md_.image_cnt_ = 0;
   md_.ray_pos_.setZero();
   md_.sliding_map_frame_pos_.setZero();
@@ -879,6 +883,8 @@ void GridMap::sensorPoseCallback(const nav_msgs::msg::Odometry::ConstSharedPtr &
   md_.ray_pos_ = ray_pos;
   md_.ray_q_ = ray_q;
   md_.has_ray_pose_ = true;
+  md_.ray_stamp_ = rclcpp::Time(pose_msg->header.stamp).seconds();
+  md_.has_ray_stamp_ = true;
   updateSlidingMap(md_.ray_pos_);
 }
 
@@ -898,6 +904,28 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr 
     RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                          "[GridMap] no sensor_pose received for lidar cloud update");
     return;
+  }
+
+  // 严格配对模式（真实传感器输入）：只接受与当前射线原点同时间的云，
+  // 否则拒绝该帧而不是把"最新 pose + 旧云"混在一起。仿真默认关闭该模式。
+  if (mp_.strict_sensor_pairing_)
+  {
+    if (!md_.has_ray_stamp_)
+    {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                           "[GridMap] strict pairing: no sensor_pose stamp cached; cloud rejected");
+      return;
+    }
+    const double cloud_stamp = rclcpp::Time(img->header.stamp).seconds();
+    const double delta = std::abs(cloud_stamp - md_.ray_stamp_);
+    if (delta > mp_.sensor_pairing_tolerance_)
+    {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                           "[GridMap] strict pairing: cloud stamp %.3f vs sensor_pose stamp %.3f "
+                           "(delta %.4fs > %.4fs); cloud rejected",
+                           cloud_stamp, md_.ray_stamp_, delta, mp_.sensor_pairing_tolerance_);
+      return;
+    }
   }
 
   pcl::PointCloud<pcl::PointXYZ> latest_cloud;
