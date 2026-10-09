@@ -43,6 +43,11 @@ TF（`frames_*.pdf` + `tf_echo_*.txt` + `tf_static_once.txt`）、各关键话�
 （含 `use_sim_time`、串口与控制话题的实际运行值）、以及可选的 `bag/`。
 **不要**把包提交到公开仓库（`log/` 已被 `.gitignore` 排除）。
 
+## 0.-1 让 Codex 接手分析采集结果
+
+采集目录在实车电脑上；把 [Codex 任务书](codex_onsite_analysis_brief.md) 交给 Codex 执行，
+它会产出 `docs/testing/onsite_field_2026-10-09.md`（现场实测事实表）、填好参数的启动命令与未决问题清单。
+
 ## 0. 一次性准备（机器人静止即可）
 
 ```bash
