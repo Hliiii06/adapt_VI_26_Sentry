@@ -27,6 +27,16 @@ bash scripts/onsite_collect_all.sh              # 全只读；约 1~2 分钟
 # 产物：log/onsite/collect_<时间戳>.tar.gz —— 直接回传这个包
 ```
 
+采集器对**每个节点单独限时**（`ros2 param dump` 遇到不响应参数服务的节点会永久挂起，
+曾导致卡在第 7/9 步、后面的打包没执行）。若某个节点被 `skip`，不影响其余内容。
+
+已经跑过一次但没打包时，用摘要脚本补：
+
+```bash
+bash scripts/onsite_digest.sh ~/下载/collect_<时间戳> --tar
+# 终端打印可粘贴摘要；--tar 同时生成 ~/下载/collect_<时间戳>.tar.gz
+```
+
 包内含：`nodes/topics/topic_info_all/node_info`、20 s 采集报告（`inspect/report.{txt,json}`）、
 TF（`frames_*.pdf` + `tf_echo_*.txt` + `tf_static_once.txt`）、各关键话题 `hz_*.txt` 与
 `echo_header_*.txt`、`cloud_stats.txt`（点云布局/尺度/是否含自身）、`params/*.yaml`

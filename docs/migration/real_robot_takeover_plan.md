@@ -8,9 +8,14 @@
 
 ## 一、单一速度来源（互斥，不靠 mux 假装仲裁）
 
-事实（**历史证据**，需现场复核）：当前底盘入口是 `hnurm_uart` 的 `twist_topic`，
-现场 YAML 覆盖为 `/cmd_vel`；同时存在 Nav2 `controller_server`/`behavior_server`、决策 `PubRobotStatus`
-等多条潜在速度源。**"两个规划器都在跑 + 一个 mux"不算互斥**。
+事实（**现场实测，用户回传 2026-10-09**）：底盘入口话题为 `/cmd_vel`，
+当前发布者是导航栈 **`controller_server`**，消息类型 `geometry_msgs/msg/Twist`（订阅者同为 `Twist`）。
+（静态历史证据：`hnurm_uart` 的 `twist_topic` 被现场 YAML 覆盖为 `/cmd_vel`；
+另有 `behavior_server`、决策 `PubRobotStatus`→`/cmd_vel_remap` 等潜在分支。）
+**"两个规划器都在跑 + 一个 mux"不算互斥**。
+
+由于候选速度已经是 `Twist`，接管期的命令闸门**直接发布 `geometry_msgs/msg/Twist` 到 `/cmd_vel` 即可**，
+不需要类型转换；但必须确认 `behavior_server` 是否也在发同一话题（若会，切换前必须先停它的发布）。
 
 接管期要求：
 

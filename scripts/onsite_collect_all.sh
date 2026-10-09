@@ -42,9 +42,11 @@ echo "== 1/9 环境与图 =="
 save basic bash -c 'date; echo; uname -a; echo; hostname; echo; printenv | grep -E "^(ROS_|RMW_)" | sort'
 save nodes ros2 node list
 save topics ros2 topic list -t
-save topic_info_all bash -c 'for t in $(ros2 topic list); do echo "===== $t"; ros2 topic info -v "$t"; done'
-{ for n in $(ros2 node list 2>/dev/null); do echo "===== $n"; ros2 node info "$n" 2>&1; done; } \
-  > "${OUT}/node_info.txt" 2>&1 || true
+save topic_info_all bash -c 'for t in $(timeout 10 ros2 topic list); do echo "===== $t"; timeout 8 ros2 topic info -v "$t" || echo "  (topic info 超时: $t)"; done'
+{ for n in $(timeout 10 ros2 node list 2>/dev/null); do
+    echo "===== $n"
+    timeout 8 ros2 node info "$n" 2>&1 || echo "  (node info 超时/失败：$n)"
+  done; } > "${OUT}/node_info.txt" 2>&1 || true
 echo "  -> node_info.txt"
 
 echo
@@ -93,13 +95,20 @@ echo "  -> cloud_stats.txt"
 
 echo
 echo "== 7/9 运行参数快照（含 use_sim_time、串口话题、控制话题）=="
+# 每个节点单独限时：个别节点（无参数服务/卡住）会让 ros2 param dump 永久挂起，
+# 之前正是这里卡住导致后面的打包没有执行。
 mkdir -p "${OUT}/params"
-for n in $(ros2 node list 2>/dev/null); do
+PARAM_TIMEOUT="${PARAM_TIMEOUT:-6}"
+for n in $(timeout 10 ros2 node list 2>/dev/null); do
   safe="$(echo "${n}" | tr '/' '_' | sed 's/^_//')"
-  ros2 param dump "${n}" > "${OUT}/params/${safe}.yaml" 2>/dev/null || true
+  if timeout "${PARAM_TIMEOUT}" ros2 param dump "${n}" > "${OUT}/params/${safe}.yaml" 2>"${OUT}/params/${safe}.err"; then
+    echo "  ok  ${n}"
+  else
+    echo "  skip ${n}（${PARAM_TIMEOUT}s 内未响应；已跳过，不影响后续打包）"
+    rm -f "${OUT}/params/${safe}.yaml"
+  fi
 done
-ls "${OUT}/params" | head -20
-echo "  -> params/*.yaml"
+echo "  -> params/*.yaml（无响应的节点会列出 skip）"
 
 echo
 echo "== 8/9 可选录包 =="
