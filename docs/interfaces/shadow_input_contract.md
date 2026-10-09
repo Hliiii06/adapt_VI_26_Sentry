@@ -173,6 +173,9 @@ python3 scripts/onsite_send_goal.py --frame odom --x 2.0 --y 0.0
 ```
 
 现场流程与必答问题见[在线影子运行手册](../migration/onsite_shadow_runbook.md)。
+断流/恢复验证用**影子专用输入闸门**（`input_gate:=true`）：`input_pause_gate` 插在实车话题与
+适配器之间，只暂停转发（规划器/跟踪器/门控保持运行），暂停/恢复时在
+`/sentry_scan/test/fault_marker` 打标记；恢复转发**不会**自动恢复旧任务。
 **待现场确认**（本页相应条目仍标 UNKNOWN）：实际话题/命名空间、类型与 QoS、
 `world`↔规划系关系、odom 参考点与朝向含义、速度所在坐标系、真实云 stamp 与时钟尺度、
 雷达/机体/规划系 TF 链、底盘控制话题的发布者名单。在线影子阶段**不向实车注入故障**。

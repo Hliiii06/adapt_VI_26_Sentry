@@ -26,6 +26,7 @@ setup(
             "shadow_guard = sentry_scan_adapter.shadow_guard:main",
             "check_inputs = sentry_scan_adapter.check_inputs:main",
             "task_adapter = sentry_scan_adapter.task_adapter:main",
+            "input_pause_gate = sentry_scan_adapter.input_pause_gate:main",
         ],
     },
 )

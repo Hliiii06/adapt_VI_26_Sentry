@@ -30,12 +30,16 @@ done
 
 最近一次完整记录：`log/shadow/final_matrix.log` 的 14 个场景**全部通过**（2026-10-07 17:02–17:08），`replay_guard` 单独执行通过，合计 **15/15**。
 
-## 二、场景矩阵（合成输入，24 个场景）
+## 二、场景矩阵（合成输入，28 个场景）
 
 | 场景 | 目的（对应交接 B3 测试） | 判据 | 结果 |
 |---|---|---|---|
 | `adapter_math` | frame/杆臂/速度样例 + 未来/倒退时间戳 + 点云布局 | 13 个单测全过 | **PASS** |
-| `guard_logic` | 影子门控逻辑：过期地图必须始终停车、锁止需新任务解除、无关闭开关 | 6 个单测全过 | **PASS** |
+| `guard_logic` | 影子门控逻辑：过期地图必须始终停车、锁止需新任务解除、无关闭开关 | 7 个单测全过 | **PASS** |
+| `onsite_tools` | **现场工具彩排**：采集 → 安全自检(idle) → 只发影子目标 → 安全自检(motion) → 录包 | 报告生成并自检通过；idle 全零、motion 有速度；目标只进 `/sentry_scan/task/goal_in`；bag 有消息 | **PASS** |
+| `external_uart_coexist` | **实车原有节点并存（四轮复审 P2）**：外部 `/uart_node` 在跑 | 打印 `external nodes outside /sentry_scan ... ['/uart_node']`，影子节点在 `/sentry_scan` 内被识别 | **PASS** |
+| `onsite_late_inputs` | **采集器后加入（四轮复审 P2）**：采集器先启动，实车发布者 5 s 后才出现 | 观察期内补建订阅（7 话题有数据）；`/tf_static` 用 transient_local 收到 3 条静态变换 | **PASS** |
+| `input_pause_gate` | **运行中断流/恢复（四轮复审 P2）**：暂停影子输入转发 → 恢复 → 新任务 | 停车延迟 0.392 s（按 `input_paused` 标记）；恢复后 `[8.4, 22.0]` 全零；新任务后恢复运动 | **PASS** |
 | `replay_guard` | 回放安全：非隔离 domain 或缺少 `/clock` 必须拒绝 | launch 拒绝并给出原因 | **PASS** |
 | `no_inputs` | 启动隔离 + 失效关闭 | 必需节点（含 `task_adapter`）在跑；影子命名空间内无禁止话题发布者；无仿真/UART 节点；`health_ok=false`；输出全零 | **PASS** |
 | `healthy_static` | 时间/QoS：端点可连接、云与射线原点配对 | 帧均为 `odom`、配对 ≤0.02 s、无任务时输出为零 | **PASS** |
@@ -66,15 +70,16 @@ done
 若需重跑完整矩阵：
 
 ```bash
-for s in adapter_math guard_logic replay_guard no_inputs healthy_static mode1_goal \
-         mode2_waypoints mode3_path task_frame_transform padded_cloud nav2_coexist \
-         cloud_stop invalid_cloud map_gate map_relatch map_relatch_newtask odom_stop tf_stop \
-         stale_stamp stamp_backwards localization_jump recovery_no_resume pairing_mismatch cancel; do
+for s in adapter_math guard_logic onsite_tools external_uart_coexist onsite_late_inputs \
+         input_pause_gate replay_guard no_inputs healthy_static mode1_goal mode2_waypoints \
+         mode3_path task_frame_transform padded_cloud nav2_coexist cloud_stop invalid_cloud \
+         map_gate map_relatch map_relatch_newtask odom_stop tf_stop stale_stamp stamp_backwards \
+         localization_jump recovery_no_resume pairing_mismatch cancel; do
   bash scripts/test_shadow_entry.sh "$s" || echo "FAILED: $s"
 done
 ```
 
-最近一次完整记录：**24/24 全部通过**（`log/shadow/final6_matrix.log`，2026-10-07 20:09–20:27；`log/` 不入库）。
+最近一次完整记录：**28/28 全部通过**（`log/shadow/final7_matrix.log`，2026-10-09 16:57–17:14；`log/` 不入库）。
 
 ## 二点五、审查修正（对照 54a1b1d–c1a2440）
 
@@ -122,6 +127,16 @@ done
 | 说明 | 本环境实测 `do_transform_cloud()` 会把填充输入重排为密集 12 字节 xyz 输出，因此"误读"取决于读端是否沿用输入布局；适配层通过先重排消除这层不确定性 | 复现命令与输出见本轮汇报；适配层行为由 `adapter_math` + `padded_cloud` 固定 |
 | 测试稳定性（非产品问题） | 合成注入器改为：等订阅端匹配**且**启动满 `--goal-delay`（默认 4 s）后再发目标；判据脚本在整个观察窗内**累积** ROS 图发现结果（DDS 发现是异步的，单次查询会漏看已存在的节点/发布者）；矩阵场景之间加 3 s 间隔 | `padded_cloud`/`mode1_goal`/`mode2_waypoints` 复跑通过；`map_gate`/`map_relatch`/`map_relatch_newtask` 各连续 2 次通过 |
 | 锁止前提细化 | 锁止只在**已有已授权任务**时触发（`task_active`）：启动阶段地图过期只需输出零，不该锁止，否则第一个任务授权会被误当成"解锁"并在日志里产生无意义的 latch/clear | `guard_logic` 新增用例（无任务时过期 → 零且不锁止），共 7 项 |
+
+## 二点八、第四轮复审修正（对照 e79c48f）
+
+| 复审项 | 修正 | 证据 |
+|---|---|---|
+| **P2 安全检查误判实车 `/uart_node`** | `check_shadow_graph` 改用 `get_node_names_and_namespaces()`（本环境 `get_node_names()` 返回不带命名空间的短名）：必需/禁止节点只在**影子命名空间**内判定，外部禁止名单（`uart_node` 等）只打印不判失败 | 场景 `external_uart_coexist`；测试替身 `spoof_external_node.py` |
+| **P2 采集漏报真实输入与静态 TF** | `onsite_inspect.py` 观察期内每 0.5 s 重新发现并补建订阅；`/tf_static`（与 `/map`）改用 **transient_local** | 场景 `onsite_late_inputs`；新增 `check_onsite_report.py` 固化判据 |
+| **P2 手册断流/恢复步骤无效** | 影子专用**可暂停输入闸门**（`input_gate:=true` + `input_pause_gate` + `onsite_pause_inputs.py`）：只暂停转发，规划器/跟踪器/门控持续运行；暂停/恢复打 `test/fault_marker` | 场景 `input_pause_gate`（先动 → 0.392 s 归零 → 恢复仍零 → 新任务恢复） |
+| **P2 录包失败被当成正常结束** | `timeout --signal=INT` 收尾；区分正常到时（rc=124）与异常；校验 `metadata.yaml` 的 `message_count > 0` | 实测正常录制 1637 条消息 rc=0；无话题时 rc=2 |
+| 手册补充 | Python 命令前补 `source /opt/ros/humble/setup.bash` 与 `source install/setup.bash`；RViz 必须显式 `start_rviz:=true` | 手册 §0/§2/§3 |
 
 ## 三、本轮新增的 SCAN 改动与回归
 

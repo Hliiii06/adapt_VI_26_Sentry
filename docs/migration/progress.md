@@ -43,6 +43,12 @@
   默认不改 RM）。
 - **待现场确认**：实际话题/类型/QoS/频率、TF 链、odom 参考点与速度坐标系、`world`↔规划系关系、
   真实云 stamp 与时钟尺度、底盘控制发布者名单；以及手册 §8 的 7 个问题。
+- **四轮复审 4 项收尾（本机实测）**：安全自检改为按 (命名空间, 节点名) 判定，实车 `/uart_node`
+  不再被误判（场景 `external_uart_coexist`）；采集器在观察期内**持续发现**话题、`/tf_static` 与 `/map`
+  用 transient_local（场景 `onsite_late_inputs` + `check_onsite_report.py`）；
+  新增**影子专用可暂停输入闸门**用于运行中断流/恢复验证（场景 `input_pause_gate`：
+  实测停车延迟 0.392 s、恢复后保持零、新任务后才恢复运动）；`onsite_record.sh` 校验
+  `metadata.yaml` 与消息数，异常返回非零（实测 1637 条消息正常结束）。
 
 ## 2026-10-07：交接 B 的 B1/B2 实现完成，B3 影子验收（合成输入）
 

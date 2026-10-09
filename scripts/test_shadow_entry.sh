@@ -12,6 +12,9 @@
 #   bash scripts/test_shadow_entry.sh task_frame_transform # 非单位 map→odom 与任务坐标转换
 #   bash scripts/test_shadow_entry.sh padded_cloud         # 行填充点云：重排为密集布局后走全链
 #   bash scripts/test_shadow_entry.sh onsite_tools         # 现场工具彩排：采集/安全自检/发目标/录包
+#   bash scripts/test_shadow_entry.sh external_uart_coexist # 实车 /uart_node 在跑时自检不误判
+#   bash scripts/test_shadow_entry.sh onsite_late_inputs    # 采集器后加入：补建订阅 + 收到静态 TF
+#   bash scripts/test_shadow_entry.sh input_pause_gate     # 暂停/恢复影子输入：停住且恢复不续跑
 #   bash scripts/test_shadow_entry.sh cloud_stop          # 云中断
 #   bash scripts/test_shadow_entry.sh odom_stop           # odom / TF 中断
 #   bash scripts/test_shadow_entry.sh tf_stop             # 仅动态 TF 中断
@@ -86,6 +89,7 @@ case "${SCENARIO}" in
   mode3_path)      LAUNCH_ARGS=(navi_mode:=3 "reference_path_file:=${SHARE}/shadow_test_reference_path.yaml") ;;
   map_gate|map_relatch|map_relatch_newtask)
                    LAUNCH_ARGS=(map_update_topic:=test/map_heartbeat) ;;
+  input_pause_gate) LAUNCH_ARGS=(input_gate:=true) ;;
 esac
 
 LAUNCH_PGID=""
@@ -164,12 +168,65 @@ case "${SCENARIO}" in
       RC=2
     fi
     ;;
+  input_pause_gate)
+    # 运行中暂停/恢复影子输入（不重启影子、不动实车节点）：
+    # 先动后停 → 恢复转发仍为零 → 新任务才恢复。
+    run_fake --duration 90 --send-goal
+    sleep 10
+    setsid python3 scripts/check_shadow_stop.py --duration 30 --fault-at 5 \
+      --zero-until 22 --resume-at 22 --expect-motion-after 25 \
+      > "${LOG_DIR}/stop_check.log" 2>&1 &
+    CHECK_PID=$!
+    sleep 5
+    python3 scripts/onsite_pause_inputs.py --pause --wait 8 || RC=$?
+    sleep 10
+    python3 scripts/onsite_pause_inputs.py --resume --wait 8 || RC=$?
+    sleep 10
+    python3 scripts/onsite_send_goal.py --frame odom --x -2.0 --y 0.0 --wait 8 || RC=$?
+    wait "${CHECK_PID}"; STOP_RC=$?
+    cat "${LOG_DIR}/stop_check.log"
+    [[ "${STOP_RC}" -ne 0 ]] && RC="${STOP_RC}"
+    ;;
+  onsite_late_inputs)
+    # 采集器先启动、实车发布者后出现：必须持续发现并补建订阅；静态 TF 必须用 TL 收到。
+    setsid python3 scripts/onsite_inspect.py --duration 22 --out-dir "${LOG_DIR}/onsite" \
+      > "${LOG_DIR}/inspect.log" 2>&1 &
+    INSPECT_PID=$!
+    sleep 5
+    run_fake --duration 60
+    wait "${INSPECT_PID}" 2>/dev/null || true
+    REPORT="$(find "${LOG_DIR}/onsite" -name report.json | head -1)"
+    echo "report=${REPORT}"
+    python3 scripts/check_onsite_report.py --report "${REPORT}" \
+      --require-topic /cloud_registered --require-topic /Odometry_transformed \
+      --require-tf-static --require-tf "base_link -> base_footprint" || RC=$?
+    ;;
+  external_uart_coexist)
+    # 实车原有 /uart_node（外部命名空间）在运行：安全自检不得把它判成影子禁止节点。
+    setsid python3 scripts/spoof_external_node.py --name uart_node --duration 60 \
+      > "${LOG_DIR}/spoof_uart.log" 2>&1 &
+    SPOOF_PID=$!
+    run_fake --duration 60
+    sleep 6
+    python3 scripts/check_shadow_graph.py --duration 8 --expect-healthy --expect-zero \
+      > "${LOG_DIR}/graph_check.log" 2>&1 || RC=$?
+    cat "${LOG_DIR}/graph_check.log"
+    if [[ "${RC}" -eq 0 ]] && ! grep -q "external nodes outside" "${LOG_DIR}/graph_check.log"; then
+      echo "FAIL: 未看到外部节点被单独统计（检查可能仍在按节点名误判）" >&2
+      RC=2
+    fi
+    kill "${SPOOF_PID}" 2>/dev/null
+    ;;
   onsite_tools)
     # 现场工具的本地彩排（合成输入）：采集 → 安全自检(idle) → 单独发目标 → 安全自检(motion) → 录包
     run_fake --duration 120
     sleep 8
     echo "-- onsite_inspect"
     python3 scripts/onsite_inspect.py --duration 8 --out-dir "${LOG_DIR}/onsite" || RC=$?
+    REPORT="$(find "${LOG_DIR}/onsite" -name report.json | head -1)"
+    python3 scripts/check_onsite_report.py --report "${REPORT}" \
+      --require-topic /cloud_registered --require-tf-static \
+      --require-tf "base_link -> base_footprint" || RC=$?
     echo "-- onsite_check_safety idle"
     bash scripts/onsite_check_safety.sh idle 6 || RC=$?
     echo "-- onsite_send_goal (只发影子入口)"

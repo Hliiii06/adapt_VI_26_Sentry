@@ -30,6 +30,8 @@ SCAN 跟踪器 ──/sentry_scan/cmd_vel_candidate──> 命令闸门 ──> 
                             健康/心跳/授权/新鲜度/限幅/看门狗
 ```
 
+- 影子阶段已有**只读版输入闸门**（`input_gate:=true` 的 `input_pause_gate`，只暂停转发、不发布速度），
+  接管期的命令闸门复用同一位置与同一套健康/心跳/授权判定，只是把输出接到底盘话题；
 - 闸门默认**不发布**；只有显式授权（`planning/task_active` 的 `task_id` 更高 + 操作者使能）且
   健康、地图心跳新鲜时才透传；
 - 可选把 `hnurm_uart` 的 `twist_topic` 参数指向闸门输出（如 `/sentry_scan/cmd_vel_gated`），

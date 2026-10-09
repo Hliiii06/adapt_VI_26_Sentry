@@ -41,6 +41,10 @@ PROPOSED = 实施细节建议；SUPERSEDED = 被后续决策或说明覆盖（�
 | 034 | 2026-10-09 | 无 ROS bag：I2 验证改为**实车在线只读影子**；暂停扩建仿真/Gazebo | **ACCEPTED（用户决定）**；离线回放步骤保留备用，真实数据仍需现场实测 |
 | 035 | 2026-10-09 | 现场工具一律只读且不改实车节点；故障注入只针对影子链路 | **ACCEPTED（用户要求）**：`onsite_inspect/run_shadow_onsite/onsite_send_goal/onsite_check_safety/onsite_record`；不得停 LIO/雷达/Nav2 |
 | 036 | 2026-10-09 | 接管采用"单一速度源 + 默认撤权 + 独立闸门"，默认不改 RM 源码 | **PROPOSED（待审查/批准）**：优先用 UART `twist_topic` 参数与运行期切换；确需改 RM 时单独列最小改动并再次申请 |
+| 037 | 2026-10-09 | 安全自检按 (命名空间, 节点名) 判定；外部 `/uart_node` 等只统计不判失败 | **ACCEPTED（四轮复审 P2）**：`get_node_names()` 在本环境返回不带命名空间的短名，必须用 `get_node_names_and_namespaces()`；新增 `external_uart_coexist` 场景 |
+| 038 | 2026-10-09 | 在线采集器持续发现话题，`/tf_static`（及 `/map`）用 transient_local 订阅 | **ACCEPTED（四轮复审 P2）**：先启动实车再采集时 volatile 订阅收不到静态外参；新增 `onsite_late_inputs` 场景与 `check_onsite_report.py` |
+| 039 | 2026-10-09 | 断流/恢复验证用影子专用可暂停输入闸门，不重启、不停实车节点 | **ACCEPTED（四轮复审 P2）**：`input_gate:=true` + `onsite_pause_inputs.py`；闸门发 `test/fault_marker`，判据按实际事件时刻计延迟；场景 `input_pause_gate` |
+| 040 | 2026-10-09 | 录包必须校验落盘与消息数，异常返回非零 | **ACCEPTED（四轮复审 P2）**：`timeout --signal=INT` 收尾 + 检查 `metadata.yaml` 的 `message_count`；失败不再打印"录制结束" |
 
 方案 C 获认可不等于已经实现；允许后续独立任务范围内的局部 SCAN 修改，不批准顺带修改固件或 RM 定位。
 无需再次询问是否选择 C；后续只在范围扩展或必要硬件参数缺失时确认具体事项。

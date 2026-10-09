@@ -23,11 +23,20 @@
 
 ```bash
 cd <本仓库>
+
+# 每个新终端都要先 source；Python 工具（采集/发目标/暂停）依赖这些环境变量
+source /opt/ros/humble/setup.bash
 scripts/build.sh                              # 10 个包（SCAN 9 + sentry_scan_adapter）
+source install/setup.bash                     # 让本仓库包与消息类型可见
 
 # 保持原有实车系统正常运行，然后采集"实际在跑什么"
 python3 scripts/onsite_inspect.py --duration 20
 # 产物：log/onsite/<时间戳>/report.txt 与 report.json
+
+# 报告自检（可选，但建议把结果一起回传）
+python3 scripts/check_onsite_report.py --report log/onsite/<时间戳>/report.json \
+  --require-topic /cloud_registered --require-topic /Odometry_transformed \
+  --require-tf-static --require-tf "base_link -> base_footprint"
 ```
 
 **需要回传的内容**（报告里已包含，另可手工复核）：
@@ -72,8 +81,10 @@ ros2 topic info -v /cmd_vel          # 原有速度源（Nav2 controller/behavio
 
 ```bash
 bash scripts/run_shadow_onsite.sh preflight_only   # 只做检查：话题存在？影子没在跑？谁在控底盘？
-bash scripts/run_shadow_onsite.sh                  # 正式启动（前台；Ctrl-C 退出）
+bash scripts/run_shadow_onsite.sh start_rviz:=true # 正式启动（前台；Ctrl-C 退出）
 ```
+
+> `start_rviz` 默认是 **false**：要按第 3 节在 RViz 里对齐，必须显式加 `start_rviz:=true`。
 
 - 默认输入：`/Odometry_transformed`、`/LIVO2/imu_propagate`、`/cloud_registered`，规划系 `odom`；
 - 若 §0 实测发现话题/命名空间不同，用环境变量覆盖后重启：
@@ -147,6 +158,10 @@ bash scripts/onsite_record.sh 120          # 默认 120 s；只录制，不发�
 # 产物：log/onsite/<时间戳>/bag/ （与同时间段 log/shadow/ 一起回传）
 ```
 
+录制脚本会核对 `metadata.yaml` 里的消息数：**异常退出、没有落盘或 0 条消息都会返回非零**，
+不会再打印"录制结束"骗人。若返回非零，先解决录制问题，不要把空 bag 当证据回传。
+需要看特定话题时用 `TOPICS="/Odometry_transformed /cloud_registered" bash scripts/onsite_record.sh 60`。
+
 ---
 
 ## 8. 影子阶段必须回答的问题（结果填此表）
@@ -161,12 +176,36 @@ bash scripts/onsite_record.sh 120          # 默认 120 s；只录制，不发�
 | 6 | 输入恢复后旧任务是否不会自动继续 | 同上恢复后不重新发目标 | 影子输出保持零，直到发新目标 | 待现场 |
 | 7 | 影子是否始终没接真实控制出口 | 每次操作后跑 `onsite_check_safety.sh` | 控制话题发布者名单里始终没有 `/sentry_scan/*` | 待现场 |
 
-**在线影子不能给实车注入故障**。第 5/6 项在影子侧完成，二选一：
+**在线影子不能给实车注入故障**，而且**重启影子会清空旧任务**，不能证明"运行中的断流锁止"。
+因此用一个只作用于影子输入的**可暂停闸门**：`input_gate:=true` 时，影子入口在实车话题与适配器之间
+插入 `input_pause_gate`（只订阅实车话题、只发 `/sentry_scan/*`），规划器/跟踪器/门控**持续运行**：
 
-- 停止影子输入适配器（`ros2 lifecycle`？不需要——直接停影子入口再单独起 `scan_planner_node`+`closed_loop_controller` 会复杂）；
-- 更简单：把影子入口的输入指向一个**不存在的话题**重启（`CLOUD_TOPIC=/no_such_cloud bash scripts/run_shadow_onsite.sh`），
-  观察影子输出为零、`planning/reset` 出现；再把输入指回真实话题重启影子，确认**不自动恢复旧任务**（需重新发目标）。
-  这一过程只影响 `/sentry_scan`，不会动到 LIO/雷达/Nav2/串口。
+```bash
+# 终端 A：带闸门启动影子（RViz 可选）
+bash scripts/run_shadow_onsite.sh input_gate:=true start_rviz:=true
+
+# 终端 B：发目标，确认候选速度正常
+python3 scripts/onsite_send_goal.py --frame odom --x 2.0 --y 0.0
+bash scripts/onsite_check_safety.sh motion
+
+# 断流：只暂停转发（实车雷达/定位/Nav2 完全不受影响）
+python3 scripts/onsite_pause_inputs.py --pause
+# 期望：health 转为不健康 -> 发布 planning/reset -> /sentry_scan/cmd_vel_shadow 归零
+ros2 topic echo /sentry_scan/health --once
+bash scripts/onsite_check_safety.sh idle
+
+# 恢复：继续转发，但**不发新目标**
+python3 scripts/onsite_pause_inputs.py --resume
+# 期望：health 恢复为 true，但影子输出仍为零（旧任务已撤销，不会自动续跑）
+bash scripts/onsite_check_safety.sh idle
+
+# 新任务才恢复
+python3 scripts/onsite_send_goal.py --frame odom --x -2.0 --y 0.0
+bash scripts/onsite_check_safety.sh motion
+```
+
+闸门在暂停/恢复时会在 `/sentry_scan/test/fault_marker` 发布标记，因此"停车延迟"按**实际事件时刻**计算。
+本仓库的合成回归场景 `input_pause_gate` 就是这条链路（实测延迟 0.392 s，恢复后保持零，新任务后恢复运动）。
 
 首轮范围：**只做平坦、空旷区域**；不测洞口、坡道、小陀螺。
 规划出路径 ≠ 车辆能安全通过；**不得**缩小真实碰撞包络或使用仿真的支撑面/诊断尺寸。

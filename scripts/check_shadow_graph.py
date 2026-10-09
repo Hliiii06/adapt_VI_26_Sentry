@@ -7,10 +7,11 @@
     python3 scripts/check_shadow_graph.py --duration 6 --expect-unhealthy
 
 检查项：
-  1. 必需节点存在（rm_input_adapter / shadow_guard / scan_planner_node /
-     closed_loop_controller）；
-  2. 禁止节点不存在（map_pub / pcl_render_node / go2_kinematic_sim /
-     open_loop_controller / go2_gait_publisher / uart_node）；
+  1. 影子命名空间内必需节点存在（rm_input_adapter / task_adapter / shadow_guard /
+     scan_planner_node / closed_loop_controller）；
+  2. **影子命名空间内**不存在禁止节点（map_pub / pcl_render_node / go2_kinematic_sim /
+     open_loop_controller / go2_gait_publisher / uart_node）。实车原有 `/uart_node` 等
+     外部节点是正常系统的一部分，只统计、不判失败；
   3. `/cmd_vel`、`/cmd_vel_remap`、`/sentry_scan/cmd_vel` **没有被影子命名空间内的节点发布**；
      外部发布者（例如并存的 Nav2）只统计、不判失败；
   4. `health_ok` 与 `cmd_vel_shadow` 的实际取值符合预期；
@@ -44,8 +45,9 @@ class ShadowGraphChecker(Node):
         self.last_health_recv = None
         self.shadow_samples = []
         self.shadow_count = 0
-        # DDS 发现是异步的：单次 get_node_names()/get_publishers_info_by_topic() 可能少看到
-        # 已经存活的节点/发布者。整个观察窗内取并集，避免把"发现延迟"误判成"节点不在"。
+        # DDS 发现是异步的：单次查询可能少看到已经存活的节点/发布者，整个观察窗内取并集。
+        # 注意 `get_node_names()` 在本环境返回**不带命名空间**的名字，无法区分"影子节点"与
+        # "实车原有节点"（例如 /uart_node），因此这里保存 (namespace, name) 对。
         self.seen_nodes = set()
         self.seen_publishers = {}
         latch = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
@@ -83,7 +85,7 @@ def main(argv=None) -> None:
     end = time.time() + args.duration
     while time.time() < end and rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.1)
-        node.seen_nodes |= set(node.get_node_names())
+        node.seen_nodes |= set(node.get_node_names_and_namespaces())
         for topic in FORBIDDEN_TOPICS:
             try:
                 for info in node.get_publishers_info_by_topic(topic):
@@ -93,15 +95,28 @@ def main(argv=None) -> None:
                 pass
 
     failures = []
-    names = {n.split("/")[-1] for n in node.seen_nodes}
-    missing = REQUIRED_NODES - names
-    if missing:
-        failures.append("missing required nodes: %s" % sorted(missing))
-    present_forbidden = FORBIDDEN_NODES & names
-    if present_forbidden:
-        failures.append("forbidden nodes running in shadow: %s" % sorted(present_forbidden))
-
     own_ns = args.shadow_namespace.rstrip("/") or "/"
+
+    shadow_nodes = {}
+    external_forbidden = []
+    # rclpy 的 get_node_names_and_namespaces() 返回 (name, namespace)
+    for name, namespace in sorted(node.seen_nodes):
+        full = "%s%s" % (((namespace or "/").rstrip("/") or "") + "/", name)
+        if (namespace or "/").rstrip("/") == own_ns:
+            shadow_nodes[name] = full
+        elif name in FORBIDDEN_NODES:
+            external_forbidden.append(full)
+
+    missing = REQUIRED_NODES - set(shadow_nodes)
+    if missing:
+        failures.append("missing required nodes in %s: %s" % (own_ns, sorted(missing)))
+    present_forbidden = sorted(set(shadow_nodes) & FORBIDDEN_NODES)
+    if present_forbidden:
+        failures.append("forbidden nodes running inside %s: %s" % (own_ns, present_forbidden))
+    if external_forbidden:
+        print("external nodes outside %s (normal vehicle stack, not a failure): %s"
+              % (own_ns, sorted(external_forbidden)))
+
     external = 0
     for (topic, namespace, node_name) in sorted(node.seen_publishers):
         if namespace == own_ns:
@@ -137,7 +152,7 @@ def main(argv=None) -> None:
         print("shadow samples=%d  max|v_xy|=%.4f  max|wz|=%.4f  max|vz|=%.4f"
               % (node.shadow_count, max_xy, max_wz, max_z))
 
-    print("nodes: %s" % sorted(names))
+    print("shadow nodes in %s: %s" % (own_ns, sorted(shadow_nodes)))
     print("health_ok: %s (samples=%d)" % (node.health, node.shadow_count))
     node.destroy_node()
     rclpy.shutdown()

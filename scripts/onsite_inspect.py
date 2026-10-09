@@ -28,7 +28,8 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
+                       ReliabilityPolicy, qos_profile_sensor_data)
 
 import tf2_msgs.msg
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist, TwistStamped
@@ -49,6 +50,9 @@ KEY_TOPICS = [
 ]
 CONTROL_TOPICS = ["/cmd_vel", "/cmd_vel_remap", "/cmd_vel_nav", "/cmd_vel_remap_unused"]
 SHADOW_PREFIX = "/sentry_scan"
+# 这些话题的发布者常带 transient_local（map_server 的 /map、静态外参 /tf_static）。
+# 采集器通常**后**加入，用 volatile 订阅会收不到已经发过的内容，因此显式请求 TL。
+TRANSIENT_LOCAL_TOPICS = ("/map", "/tf_static")
 
 TYPE_REGISTRY = {
     "nav_msgs/msg/Odometry": Odometry,
@@ -76,10 +80,20 @@ def _stamp_s(msg):
     return float(header.stamp.sec) + float(header.stamp.nanosec) * 1e-9
 
 
+def _qos_for(topic):
+    if topic in TRANSIENT_LOCAL_TOPICS:
+        return QoSProfile(depth=100, history=HistoryPolicy.KEEP_LAST,
+                          reliability=ReliabilityPolicy.RELIABLE,
+                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
+    # SensorDataQoS（best effort）与 reliable 发布者兼容；对 volatile 的流式数据足够。
+    return qos_profile_sensor_data
+
+
 class Channel:
     def __init__(self, topic, type_name):
         self.topic = topic
         self.type_name = type_name
+        self.subscribed = False
         self.count = 0
         self.first = None
         self.last = None
@@ -117,28 +131,45 @@ class Channel:
 class OnsiteInspector(Node):
     def __init__(self, topics):
         super().__init__("onsite_inspect")
-        self.channels = {}
+        self.topics = list(topics)
+        self.channels = {topic: Channel(topic, "") for topic in self.topics}
         self.tf_pairs = {}
         self.tf_static_pairs = {}
+        self._tf_subscribed = False
+        self._tf_static_subscribed = False
+        # 首轮 + 观察期内持续发现：实车话题可能在采集器之后才出现（DDS 发现/启动顺序）。
+        self.refresh_subscriptions()
+
+    def refresh_subscriptions(self):
+        """把"现在才出现"的话题补上订阅。已订阅的不重复创建。"""
         available = dict(self.get_topic_names_and_types())
-        for topic in topics:
+        for topic in self.topics:
+            channel = self.channels[topic]
+            if channel.subscribed:
+                continue
             types = available.get(topic)
             if not types:
-                self.channels[topic] = Channel(topic, "")
-                self.channels[topic].notes.append("topic not present")
+                if "topic not present" not in channel.notes:
+                    channel.notes.append("topic not present")
                 continue
             type_name = types[0]
+            channel.type_name = type_name
             msg_class = TYPE_REGISTRY.get(type_name)
-            channel = Channel(topic, type_name)
-            self.channels[topic] = channel
             if msg_class is None:
-                channel.notes.append("type not auto-subscribed (not in registry)")
+                if "type not auto-subscribed (not in registry)" not in channel.notes:
+                    channel.notes.append("type not auto-subscribed (not in registry)")
                 continue
-            self.create_subscription(msg_class, topic, channel.note, qos_profile_sensor_data)
-        # TF：单独记录 parent→child
-        self.create_subscription(tf2_msgs.msg.TFMessage, "/tf", self._on_tf, qos_profile_sensor_data)
-        self.create_subscription(tf2_msgs.msg.TFMessage, "/tf_static",
-                                 self._on_tf_static, qos_profile_sensor_data)
+            self.create_subscription(msg_class, topic, channel.note, _qos_for(topic))
+            channel.subscribed = True
+            channel.notes = [n for n in channel.notes if n != "topic not present"]
+        if not self._tf_subscribed and "/tf" in available:
+            self.create_subscription(tf2_msgs.msg.TFMessage, "/tf", self._on_tf, _qos_for("/tf"))
+            self._tf_subscribed = True
+        if not self._tf_static_subscribed and "/tf_static" in available:
+            # 一次性 latch 的话题：必须 transient_local，否则先启动实车再采集会收不到
+            self.create_subscription(tf2_msgs.msg.TFMessage, "/tf_static", self._on_tf_static,
+                                     _qos_for("/tf_static"))
+            self._tf_static_subscribed = True
 
     @staticmethod
     def _merge(pairs, msg):
@@ -233,8 +264,12 @@ def main(argv=None):
     rclpy.init(args=ros_args)
     node = OnsiteInspector(topics)
     end = time.time() + args.duration
+    next_refresh = 0.0
     while time.time() < end and rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.1)
+        if time.time() >= next_refresh:
+            node.refresh_subscriptions()
+            next_refresh = time.time() + 0.5
     report = node.collect()
     failures, warnings, control_publishers = node.verdicts(report)
     node.destroy_node()
@@ -252,8 +287,10 @@ def main(argv=None):
     lines.append("观测窗口: %.1fs" % args.duration)
     lines.append("")
     lines.append("== 节点 ==")
-    for namespace, name in report["nodes"]:
-        lines.append("  %s%s" % (namespace, name))
+    # rclpy 的 get_node_names_and_namespaces() 返回 (name, namespace)
+    for name, namespace in report["nodes"]:
+        prefix = (namespace or "/").rstrip("/")
+        lines.append("  %s/%s" % (prefix, name))
     lines.append("")
     lines.append("== 关键话题 ==")
     lines.append("%-28s %-34s %8s %7s %9s %9s  %s"

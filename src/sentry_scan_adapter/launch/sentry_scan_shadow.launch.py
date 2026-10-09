@@ -137,6 +137,17 @@ def _setup(context):
     start_rviz = _as_bool(value("start_rviz"))
     log_dir = os.path.expanduser(value("shadow_log_dir"))
 
+    input_gate = _as_bool(value("input_gate"))
+    # input_gate:=true 时，适配器改为消费闸门输出；闸门只读实车话题，用于现场验证断流/恢复。
+    if input_gate:
+        adapter_odom = "test/odom"
+        adapter_velocity = "test/velocity"
+        adapter_cloud = "test/cloud"
+    else:
+        adapter_odom = value("odom_topic")
+        adapter_velocity = value("velocity_topic")
+        adapter_cloud = value("cloud_topic")
+
     common = {"use_sim_time": use_sim_time}
     nodes = [
         LogInfo(msg="SHADOW MODE (no chassis output): adapter -> SCAN -> candidate velocity; "
@@ -148,9 +159,9 @@ def _setup(context):
                 "planning_frame": planning_frame, "task_frame": task_frame,
                 "body_frame": body_frame, "sensor_frame": sensor_frame,
                 "velocity_frame": value("velocity_frame"),
-                "odom_topic": value("odom_topic"),
-                "velocity_topic": value("velocity_topic"),
-                "cloud_topic": value("cloud_topic"),
+                "odom_topic": adapter_odom,
+                "velocity_topic": adapter_velocity,
+                "cloud_topic": adapter_cloud,
                 "max_source_age": float(value("max_source_age")),
                 "max_receive_age": float(value("max_receive_age")),
                 "tf_future_tolerance": float(value("tf_future_tolerance")),
@@ -207,6 +218,16 @@ def _setup(context):
                 "max_map_age": float(value("max_map_age")),
             }],
         ),
+        Node(
+            package="sentry_scan_adapter", executable="input_pause_gate", name="input_pause_gate",
+            namespace=NAMESPACE, output="screen",
+            parameters=[contract_yaml, common, {
+                "odom_in": value("odom_topic"),
+                "velocity_in": value("velocity_topic"),
+                "cloud_in": value("cloud_topic"),
+            }],
+        ) if input_gate else LogInfo(msg="input_gate:=false (断流/恢复验证不可用；"
+                                         "用 input_gate:=true 启动可暂停的影子输入)"),
         Node(
             package="sentry_scan_adapter", executable="task_adapter", name="task_adapter",
             namespace=NAMESPACE, output="screen",
@@ -273,6 +294,9 @@ def generate_launch_description():
         DeclareLaunchArgument("max_map_age", default_value="0.5",
                               description="心跳超过该时间影子输出归零"),
         DeclareLaunchArgument("start_rviz", default_value="false"),
+        DeclareLaunchArgument("input_gate", default_value="false",
+                              description="true = 在实车话题与适配器之间插入可暂停的输入闸门"
+                                          "（现场断流/恢复验证；只影响 /sentry_scan）"),
         DeclareLaunchArgument("use_sim_time", default_value="false",
                               description="仅回放时为 true，且必须有 /clock"),
         DeclareLaunchArgument("replay", default_value="false",

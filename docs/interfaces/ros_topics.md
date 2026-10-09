@@ -170,6 +170,9 @@ uint32 task_id
 | `/sentry_scan/initial_path` | `nav_msgs/msg/Path` | `task_adapter` → FSM Mode 3 | reliable + transient_local、depth 1 | 规划系，地面 z（`body_height` 由 SCAN 加一次） |
 | `/sentry_scan/grid_map/cloud_update` | `std_msgs/msg/Header` | GridMap → `shadow_guard` | reliable、volatile、depth 10 | 最近**被接受**的点云 stamp；拒绝的云不发布 |
 | `/sentry_scan/test/fault_marker` | `std_msgs/msg/Header` | 测试注入器 → 判据脚本 | reliable、volatile、depth 10 | **仅测试**：注入故障时的实际事件时刻（`frame_id`=原因），用于按真实时刻计算停车延迟 |
+| `/sentry_scan/test/{odom,velocity,cloud}` | `Odometry` / `PointCloud2` | `input_pause_gate` → `rm_input_adapter` | SensorDataQoS | **仅 `input_gate:=true`**：闸门输出；暂停时停止转发，用于现场断流/恢复验证 |
+| `/sentry_scan/test/pause_inputs` | `std_msgs/msg/Bool` | `onsite_pause_inputs.py` → `input_pause_gate` | reliable、volatile、depth 10 | `true`=暂停转发（只影响影子输入） |
+| `/sentry_scan/test/input_paused` | `std_msgs/msg/Bool` | `input_pause_gate` → 操作者/判据 | reliable、**transient_local**、depth 1 | 当前闸门状态（latch，便于后加入者读取） |
 | `/sentry_scan/cmd_vel_candidate` | `geometry_msgs/msg/Twist` | `closed_loop_controller`（`cmd_vel` remap）→ `shadow_guard` | reliable、volatile、depth 20 | 机体系 vx/vy；`angular.z` 恒 0（`yaw_candidate_enabled=false`） |
 | `/sentry_scan/cmd_vel_shadow` | `geometry_msgs/msg/Twist` | `shadow_guard` → 记录/显示 | reliable、volatile、depth 1 | 同上；**不接车** |
 

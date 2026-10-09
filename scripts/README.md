@@ -68,7 +68,10 @@
 | `run_shadow_onsite.sh` | 现场启动影子入口：预检（输入话题、影子未重复、控制发布者）后 `ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py`；`preflight_only` 只检查 |
 | `onsite_send_goal.py` | 只向 `/sentry_scan/task/{goal_in,path_in}` 发目标/路线；话题不在 `/sentry_scan/` 下直接拒绝 |
 | `onsite_check_safety.sh` | 影子安全自检：图隔离、影子命名空间无控制话题发布者、`angular.z/linear.z` 恒零、idle 全零 / motion 有速度 |
-| `onsite_record.sh` | 可选：录制现场所需话题与 TF 到 `log/onsite/<ts>/bag`（只记录） |
+| `onsite_record.sh` | 可选：录制现场所需话题与 TF 到 `log/onsite/<ts>/bag`；**校验 metadata 与消息数，异常/0 条返回非零** |
+| `check_onsite_report.py` | 校验采集报告：必需话题的消息数、`/tf_static` 是否收到、指定 TF 是否存在 |
+| `onsite_pause_inputs.py` | 暂停/恢复影子输入转发（配合 `input_gate:=true`），只影响 `/sentry_scan` |
+| `spoof_external_node.py` | 测试替身：模拟实车原有节点（如 `/uart_node`）在运行，验证自检不误判 |
 
 流程与判据见 [在线影子运行手册](../docs/migration/onsite_shadow_runbook.md)。
 
