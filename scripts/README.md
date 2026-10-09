@@ -60,6 +60,18 @@
 启动入口为 `ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py`（`start_rviz:=false` 可无界面）。
 契约与回放步骤见 [影子输入契约](../docs/interfaces/shadow_input_contract.md)。
 
+## 实车在线影子（现场，2026-10-09）
+
+| 脚本 | 用途 |
+|---|---|
+| `onsite_inspect.py` | **只读采集**：话题/类型/QoS/频率/时间戳/frame、TF 链、控制话题发布者 → `log/onsite/<ts>/report.{txt,json}`；缺关键输入或影子出现在控制话题上返回非零 |
+| `run_shadow_onsite.sh` | 现场启动影子入口：预检（输入话题、影子未重复、控制发布者）后 `ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py`；`preflight_only` 只检查 |
+| `onsite_send_goal.py` | 只向 `/sentry_scan/task/{goal_in,path_in}` 发目标/路线；话题不在 `/sentry_scan/` 下直接拒绝 |
+| `onsite_check_safety.sh` | 影子安全自检：图隔离、影子命名空间无控制话题发布者、`angular.z/linear.z` 恒零、idle 全零 / motion 有速度 |
+| `onsite_record.sh` | 可选：录制现场所需话题与 TF 到 `log/onsite/<ts>/bag`（只记录） |
+
+流程与判据见 [在线影子运行手册](../docs/migration/onsite_shadow_runbook.md)。
+
 ## 诊断探针（不构成验收）
 
 | 脚本 | 用途 |

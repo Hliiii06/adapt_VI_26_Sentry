@@ -5,7 +5,12 @@
 **交接 A 仓库整理已完成**（[整理报告](docs/migration/cleanup_report.md)）；[交接 B](docs/migration/real_robot_handoff.md)
 的 **B1/B2 已实现**：`/sentry_scan` 影子入口只读真实输入、无底盘输出，契约见
 [影子输入契约](docs/interfaces/shadow_input_contract.md)，结果见[影子验收证据](docs/testing/shadow_acceptance.md)。
-**交付到 B3 即停止**，等 Codex 审查与用户许可；I3 驱车未授权。
+
+**当前路径（2026-10-09 起）**：没有 ROS bag，改为**实车在线只读影子验证**——
+流程见[在线影子运行手册](docs/migration/onsite_shadow_runbook.md)，
+接管方案为 **PROPOSED**（[接管方案](docs/migration/real_robot_takeover_plan.md)），
+**未授权发布真实底盘命令**；受控驱车须 Codex 审查 + 用户明确同意。
+在线影子阶段**不向实车注入故障**（故障注入只针对影子链路），首轮只做平坦空旷区域。
 实施仍在本仓库，RM 和 SCAN 参考仓库继续只读。
 保留已有仿真作回归，不扩展 Gazebo，不把无支撑面的开环航点预览接到实车。
 历史过程与证据在 [docs/archive/](docs/archive/README.md)：引用归档页必须写明“历史记录”及取代它的当前文档，

@@ -26,6 +26,24 @@
   回放与影子验收。本轮 Codex 只交付计划，未实现任何 adapter，未授权硬件或底盘输出。
 - 参考仓库 RM main `7dfe71a`、SCAN2 main `103bce4` 状态未变；RM 两项未跟踪内容与 SCAN1 原有修改保留。
 
+## 2026-10-09：改为实车在线只读影子；现场工具与接管方案交付
+
+用户决定：没有 ROS bag，改为**实车在线只读影子验证**；暂停扩建仿真与 Gazebo。
+本轮授权读取实车输入、实现影子接入；**不授权发布真实底盘命令**（受控驱车需 Codex 审查 + 用户同意）。
+
+- 上一轮两项审查问题确认已修：行填充点云先重排再变换（`rm_input_adapter.py:_densify_cloud`，
+  测试 `test_padded_cloud_survives_check_densify_and_transform`）；地图过期始终停车、
+  删除 `revoke_on_map_stale`（`shadow_guard.py:decide`，测试 `test_stale_map_always_stops_*`）。
+- 新增现场只读工具（**本机实测**，合成输入下彩排通过，场景 `onsite_tools`）：
+  `onsite_inspect.py`（话题/类型/QoS/频率/时间戳/TF/控制发布者 → `log/onsite/<ts>/report.{txt,json}`）、
+  `run_shadow_onsite.sh`（预检 + 启动影子）、`onsite_send_goal.py`（只发 `/sentry_scan/task/*`）、
+  `onsite_check_safety.sh`（影子未接真实控制入口）、`onsite_record.sh`（可选录包）。
+- 文档：[在线影子运行手册](onsite_shadow_runbook.md)（现场最短流程、采集命令、回传清单、7 个必答问题）、
+  [实车接管方案](real_robot_takeover_plan.md)（PROPOSED：单一速度源、默认撤权、急停与退回、首轮低速步骤、
+  默认不改 RM）。
+- **待现场确认**：实际话题/类型/QoS/频率、TF 链、odom 参考点与速度坐标系、`world`↔规划系关系、
+  真实云 stamp 与时钟尺度、底盘控制发布者名单；以及手册 §8 的 7 个问题。
+
 ## 2026-10-07：交接 B 的 B1/B2 实现完成，B3 影子验收（合成输入）
 
 用户批准开始任务二。**本轮实现了影子接入代码**，仍未接实车、仍未向底盘输出。

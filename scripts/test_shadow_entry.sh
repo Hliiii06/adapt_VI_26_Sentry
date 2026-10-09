@@ -11,6 +11,7 @@
 #   bash scripts/test_shadow_entry.sh mode3_path          # Mode 3 参考路线
 #   bash scripts/test_shadow_entry.sh task_frame_transform # 非单位 map→odom 与任务坐标转换
 #   bash scripts/test_shadow_entry.sh padded_cloud         # 行填充点云：重排为密集布局后走全链
+#   bash scripts/test_shadow_entry.sh onsite_tools         # 现场工具彩排：采集/安全自检/发目标/录包
 #   bash scripts/test_shadow_entry.sh cloud_stop          # 云中断
 #   bash scripts/test_shadow_entry.sh odom_stop           # odom / TF 中断
 #   bash scripts/test_shadow_entry.sh tf_stop             # 仅动态 TF 中断
@@ -162,6 +163,22 @@ case "${SCENARIO}" in
       echo "FAIL: 带行填充的点云没有被适配层重排为密集布局" >&2
       RC=2
     fi
+    ;;
+  onsite_tools)
+    # 现场工具的本地彩排（合成输入）：采集 → 安全自检(idle) → 单独发目标 → 安全自检(motion) → 录包
+    run_fake --duration 120
+    sleep 8
+    echo "-- onsite_inspect"
+    python3 scripts/onsite_inspect.py --duration 8 --out-dir "${LOG_DIR}/onsite" || RC=$?
+    echo "-- onsite_check_safety idle"
+    bash scripts/onsite_check_safety.sh idle 6 || RC=$?
+    echo "-- onsite_send_goal (只发影子入口)"
+    python3 scripts/onsite_send_goal.py --frame odom --x 2.0 --y 0.0 --wait 10 || RC=$?
+    sleep 4
+    echo "-- onsite_check_safety motion"
+    bash scripts/onsite_check_safety.sh motion 8 || RC=$?
+    echo "-- onsite_record 5s"
+    timeout 30 bash scripts/onsite_record.sh 5 || RC=$?
     ;;
   nav2_coexist)
     # 旧导航（外部命名空间）在 /cmd_vel 上发布：影子仍应放行候选速度。

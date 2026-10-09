@@ -38,6 +38,9 @@ PROPOSED = 实施细节建议；SUPERSEDED = 被后续决策或说明覆盖（�
 | 031 | 2026-10-07 | 点云按 PointCloud2 布局解析；不支持的布局显式拒绝 | **ACCEPTED（复审 P2）**：只接受 `is_bigendian=false` + x/y/z 为 FLOAT32；大端/FLOAT64/截断数据拒绝 |
 | 032 | 2026-10-07 | 带行填充的云先重排为密集布局再变换 | **ACCEPTED（三轮复审 P2）**：`tf2_sensor_msgs.do_transform_cloud()` 按连续 `point_step` 遍历，读端沿用输入布局会把填充当点；检查/重排/变换/输出均有单测，并有 `padded_cloud` 全链场景 |
 | 033 | 2026-10-07 | 地图过期始终停车并撤销+锁止，删除 `revoke_on_map_stale` | **ACCEPTED（三轮复审 P2）**：该开关同时决定"是否撤销"和"是否允许输出"，关掉会放行过期地图下的 0.4 m/s 候选 |
+| 034 | 2026-10-09 | 无 ROS bag：I2 验证改为**实车在线只读影子**；暂停扩建仿真/Gazebo | **ACCEPTED（用户决定）**；离线回放步骤保留备用，真实数据仍需现场实测 |
+| 035 | 2026-10-09 | 现场工具一律只读且不改实车节点；故障注入只针对影子链路 | **ACCEPTED（用户要求）**：`onsite_inspect/run_shadow_onsite/onsite_send_goal/onsite_check_safety/onsite_record`；不得停 LIO/雷达/Nav2 |
+| 036 | 2026-10-09 | 接管采用"单一速度源 + 默认撤权 + 独立闸门"，默认不改 RM 源码 | **PROPOSED（待审查/批准）**：优先用 UART `twist_topic` 参数与运行期切换；确需改 RM 时单独列最小改动并再次申请 |
 
 方案 C 获认可不等于已经实现；允许后续独立任务范围内的局部 SCAN 修改，不批准顺带修改固件或 RM 定位。
 无需再次询问是否选择 C；后续只在范围扩展或必要硬件参数缺失时确认具体事项。

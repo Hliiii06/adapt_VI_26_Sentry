@@ -21,6 +21,8 @@
 | 工作区规则 | [AGENTS.md](../AGENTS.md) | 边界、参考路径、工程/安全规则 |
 | 构建与启动 | 根 [README.md](../README.md)、[scripts/README.md](../scripts/README.md) | 脚本分组与常用命令 |
 | 当前任务 | [交接 B](migration/real_robot_handoff.md) | I1/I2 剩余项、审查边界 |
+| **现场运行手册** | [在线影子运行手册](migration/onsite_shadow_runbook.md) | 实车只读影子的最短流程、采集命令、必答问题 |
+| **实车接管方案** | [接管方案（PROPOSED）](migration/real_robot_takeover_plan.md) | 单一速度源、默认撤权、急停/回退、首轮低速步骤 |
 | 影子输入契约 | [shadow_input_contract.md](interfaces/shadow_input_contract.md) | `/sentry_scan` 接口、frame/时间/降级规则（唯一事实入口） |
 | 影子验收证据 | [shadow_acceptance.md](testing/shadow_acceptance.md) | 场景矩阵、判据、结果与未验证项 |
 | 阶段与门槛 | [实施计划](migration/plan.md) | S/I 阶段、执行与停止规则、回退 |

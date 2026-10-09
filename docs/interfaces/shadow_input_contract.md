@@ -160,6 +160,23 @@ z 膨胀 = `robot_height/2`（默认 0.125）。
   `zero_yaw_candidate`（默认 true）置零，MCU 保留朝向所有权；
 - launch 不启动 `open_loop_controller`（它直接发布模拟里程计，不是实车接口）。
 
+## 六点五、现场在线影子（2026-10-09 起的主路径）
+
+没有 ROS bag，改为**实车在线只读影子**（机器人静止即可开始）：
+
+```bash
+python3 scripts/onsite_inspect.py --duration 20     # 采集实际话题/类型/QoS/频率/TF/控制发布者
+bash scripts/run_shadow_onsite.sh preflight_only    # 预检：输入话题存在、影子未重复启动、谁在控底盘
+bash scripts/run_shadow_onsite.sh                   # 启动 /sentry_scan（无底盘输出）
+bash scripts/onsite_check_safety.sh idle|motion     # 影子未接真实控制入口
+python3 scripts/onsite_send_goal.py --frame odom --x 2.0 --y 0.0
+```
+
+现场流程与必答问题见[在线影子运行手册](../migration/onsite_shadow_runbook.md)。
+**待现场确认**（本页相应条目仍标 UNKNOWN）：实际话题/命名空间、类型与 QoS、
+`world`↔规划系关系、odom 参考点与朝向含义、速度所在坐标系、真实云 stamp 与时钟尺度、
+雷达/机体/规划系 TF 链、底盘控制话题的发布者名单。在线影子阶段**不向实车注入故障**。
+
 ## 七、回放（B3）
 
 没有录包时用[合成输入](../../scripts/fake_rm_inputs.py)验证契约；有录包时：

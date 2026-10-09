@@ -3,7 +3,9 @@
 本页是判据与门槛的唯一入口。独立仿真阶段（S0–S3 及后续修正）**已执行**，当轮结果见[归档 S3 结果](../archive/s3_results.md)、[真实 PCD 路线修复](pcd_route_fix.md)、[地形与高度跟随](terrain_following.md)；SCAN 实车测试为最后阶段。现有 RM 的 RViz 2D goal 导航已由用户验证，作为回归对照基线，不是 SCAN 适配结果。
 
 > I1/I2 影子接入的最低测试矩阵、隔离要求与断言方式见[实车影子接入交接](../migration/real_robot_handoff.md) B3；
-> 已执行的影子场景、命令与逐条结果见[影子验收证据](shadow_acceptance.md)，本页不重复其表格。
+> 已执行的影子场景、命令与逐条结果见[影子验收证据](shadow_acceptance.md)；
+> 实车在线只读影子的现场流程、采集命令与必答问题见[在线影子运行手册](../migration/onsite_shadow_runbook.md)，
+> 接管门槛见[实车接管方案](../migration/real_robot_takeover_plan.md)（PROPOSED）。本页不重复其表格。
 
 ## 独立仿真验收（已执行，保留作回归判据）
 
