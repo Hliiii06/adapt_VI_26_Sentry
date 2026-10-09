@@ -21,8 +21,8 @@
 - 用户已指定：文档维护在本目录；RM 参考 `../VI_26_Sentry` 的 **main**。
 - ROS 2 SCAN：`../../SCAN-Planner-Ros2`；ROS 1 注释参考：`../../SCAN-Planner`。
 - 精确提交、脏文件及证据入口见 [docs/README.md](docs/README.md)。不要把 `feature/odin` 或已有 `install/` 的行为当成 main 源码事实。
-- 本目录自 2026-10-01 起是**私有 Git 仓库**：`git@github.com:Hliiii06/adapt_VI_26_Sentry.git`，主分支 `main`。入库内容是文档、`scripts/`、`AGENTS.md`、`README.md`、`build.md` 与 `src/`（纳入本仓库的 SCAN 源码）；`artifacts/`、`log/`、`build/`、`install/` 由 `.gitignore` 排除，编译产物不入库，也不要用 `git add -f` 绕过。
-- 参考仓库（`../VI_26_Sentry`、`../../SCAN-Planner-Ros2`、`../../SCAN-Planner`）各有自己的远端，不要在本仓库提交或推送它们的源码与改动；本仓库正常提交/推送无需再逐次征求许可，但**推送前**确认没有密钥、串口配置等敏感文件被新增进跟踪范围。
+- 本仓库 `git@github.com:Hliiii06/adapt_VI_26_Sentry.git`（主分支 `main`）自 **2026-10-09 起是公开仓库**（用户确认）。公开意味着**当前内容与全部历史**对所有人可见：每次推送前必须扫描**整个历史**（`git grep <模式> $(git rev-list --all)`，不只是本次 diff），确认没有密钥、口令、token、串口/设备配置、内网地址等敏感信息。入库内容是文档、`scripts/`、`AGENTS.md`、`README.md`、`build.md` 与 `src/`（纳入本仓库的 SCAN 源码）；`artifacts/`、`log/`、`build/`、`install/` 由 `.gitignore` 排除，编译产物不入库，也不要用 `git add -f` 绕过。
+- 参考仓库（`../VI_26_Sentry`、`../../SCAN-Planner-Ros2`、`../../SCAN-Planner`）各有自己的远端，不要在本仓库提交或推送它们的源码与改动；本仓库正常提交/推送无需再逐次征求许可，但**推送前**必须完成上述敏感信息扫描（公开仓库尤其如此），并在回复里说明扫描范围与结论。
 - **`src/` 是实施副本，不是参考仓库**：来源为 SCAN-Planner-Ros2 main `103bce4`，改动边界见 [实施报告](docs/migration/implementation_report.md)。不要再把 `../../SCAN-Planner-Ros2` 当作待改代码；它保持只读。RM 的 `../VI_26_Sentry` 始终只读。
 - 当前阶段：S0–S3 与地形/洞口工作已完成；**I1/I2 影子接入已实现并通过合成输入契约测试**，
   尚未接入 VI_26_Sentry 实车、未授权底盘输出。RViz 图形交互在本环境无法验证。
