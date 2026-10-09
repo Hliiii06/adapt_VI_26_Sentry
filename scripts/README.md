@@ -74,6 +74,8 @@
 | `onsite_control_audit.py` | **只读拓扑审计**：精确区分控制话题的发布者/订阅者（`ros2 topic info -v` 的文本会用 grep 把订阅者误显示成发布者）；影子出现在发布者名单即失败 |
 | `onsite_health_dump.py` | **只读诊断**：打印 `/sentry_scan/health` 的原因字符串与每通道 `count/rejected/frame/age_s`；健康=0、不健康=2、收不到=3 |
 | `onsite_diagnose.sh` | 现场一条命令：健康原因 + 适配器拒绝日志 + 门控 CSV 原因 + 控制话题拓扑 + 最近采集报告 |
+| `onsite_collect_all.sh` | **现场一次性采集包**（全只读）：环境/图/话题信息、20 s 采集报告、TF（view_frames + tf2_echo + /tf_static）、频率与时间戳、点云特征、运行参数快照、可选 bag；打包 `log/onsite/collect_<ts>.tar.gz` |
+| `onsite_cloud_stats.py` | 只读采样点云：布局（point_step/row_step/is_bigendian）、有限点数、x/y/z 范围、距原点 0.6 m 内点数（判断是否含车体自身），用于定 `min_valid_points` 与包络 |
 | `spoof_external_node.py` | 测试替身：模拟实车原有节点（如 `/uart_node`）在运行，验证自检不误判 |
 
 流程与判据见 [在线影子运行手册](../docs/migration/onsite_shadow_runbook.md)。

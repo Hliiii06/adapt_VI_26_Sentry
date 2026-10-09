@@ -19,6 +19,20 @@
 
 ---
 
+## 0.0 现场一次性采集（推荐先跑这个）
+
+```bash
+cd ~/adapt_VI_26_Sentry && git pull
+bash scripts/onsite_collect_all.sh              # 全只读；约 1~2 分钟
+# 产物：log/onsite/collect_<时间戳>.tar.gz —— 直接回传这个包
+```
+
+包内含：`nodes/topics/topic_info_all/node_info`、20 s 采集报告（`inspect/report.{txt,json}`）、
+TF（`frames_*.pdf` + `tf_echo_*.txt` + `tf_static_once.txt`）、各关键话题 `hz_*.txt` 与
+`echo_header_*.txt`、`cloud_stats.txt`（点云布局/尺度/是否含自身）、`params/*.yaml`
+（含 `use_sim_time`、串口与控制话题的实际运行值）、以及可选的 `bag/`。
+**不要**把包提交到公开仓库（`log/` 已被 `.gitignore` 排除）。
+
 ## 0. 一次性准备（机器人静止即可）
 
 ```bash
