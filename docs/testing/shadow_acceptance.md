@@ -138,6 +138,20 @@ done
 | **P2 录包失败被当成正常结束** | `timeout --signal=INT` 收尾；区分正常到时（rc=124）与异常；校验 `metadata.yaml` 的 `message_count > 0` | 实测正常录制 1637 条消息 rc=0；无话题时 rc=2 |
 | 手册补充 | Python 命令前补 `source /opt/ros/humble/setup.bash` 与 `source install/setup.bash`；RViz 必须显式 `start_rviz:=true` | 手册 §0/§2/§3 |
 
+## 二点九、现场实跑暴露的工具缺陷（2026-10-09，实车静止）
+
+用户在实车静止时跑 `onsite_check_safety.sh motion`，暴露出**脚本自身**的两个缺陷（非产品问题）：
+
+| 缺陷 | 现象 | 修正 |
+|---|---|---|
+| 控制话题拓扑用 `ros2 topic info -v | grep` 解析 | 把订阅者（`uart_node`、`TfTransformer`）与发布者混在一起显示，并出现误导性的 `Publisher count: 0` | 新增 `onsite_control_audit.py`：用 rclpy 的 publishers/subscriptions API 精确区分；`onsite_check_safety.sh` 第 2/3 步改用它 |
+| 诊断脚本把"收到 health"当作健康 | `onsite_diagnose.sh` 在 `health_ok=False` 时仍打印“影子健康” | `onsite_health_dump.py` 解析 `DiagnosticStatus.level`（byte/bytes）并区分退出码：健康 0 / 不健康 2 / 收不到 3；诊断脚本据此给出正确结论 |
+| 缺可执行诊断入口 | 现场只能看到 `health_ok=False`，看不到原因 | 新增 `onsite_diagnose.sh`：一条命令打印 health 原因、适配器拒绝日志、门控 CSV、控制话题拓扑、最近采集报告 |
+
+**实车当前状态（用户回传，2026-10-09 19:20）**：`health_ok=False`、影子输出全零、
+影子命名空间未出现在控制话题发布者名单、`/cmd_vel` 上未发现发布者（原系统的速度来源待现场确认）。
+原因待 `onsite_diagnose.sh` 输出确认，**尚未开始在线对齐检查**。
+
 ## 三、本轮新增的 SCAN 改动与回归
 
 | 改动 | 默认行为 | 回归 |

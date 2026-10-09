@@ -10,7 +10,10 @@
 #      /sentry_scan/cmd_vel 发布者；外部（Nav2）发布者只统计、不判失败；
 #   2. 影子速度的 angular.z / linear.z 恒为 0（不透传 yaw 与未定义分量）；
 #   3. idle 模式下 /sentry_scan/cmd_vel_shadow 必须全零；motion 模式必须出现 ≥0.2 m/s；
-#   4. 控制话题发布者名单（人工确认：只有原有导航，没有影子节点）。
+#   4. 控制话题拓扑：用 onsite_control_audit.py 精确区分**发布者/订阅者**
+#      （不要用 grep `ros2 topic info -v`，它会把订阅者如 uart_node 显示成发布者）。
+#
+# 不健康时先跑：bash scripts/onsite_diagnose.sh（打印每通道原因与拒绝日志）。
 
 set -uo pipefail
 
@@ -41,18 +44,15 @@ echo "== 1/4 影子图与门控（mode=${MODE}）"
 python3 scripts/check_shadow_graph.py --duration "${DURATION}" --expect-healthy "${EXTRA[@]}" || RC=$?
 
 echo
-echo "== 2/4 控制话题发布者（人工确认：只有原有导航）"
-for topic in /cmd_vel /cmd_vel_remap /cmd_vel_nav; do
-  echo "-- ${topic}"
-  ros2 topic info -v "${topic}" 2>/dev/null | sed -n '1,40p' | grep -E "Publisher count|Node name|Node namespace|Topic type" || echo "   (无此话题)"
-done
+echo "== 2/4 控制话题拓扑（发布者 vs 订阅者，精确区分）"
+python3 scripts/onsite_control_audit.py || RC=2
 
 echo
-echo "== 3/4 影子命名空间内是否出现控制话题发布者（必须为 0）"
-SHADOW_CMD=$(ros2 topic info -v /cmd_vel 2>/dev/null | grep -c "/sentry_scan" || true)
-echo "   /cmd_vel 上影子命名空间发布者数量: ${SHADOW_CMD}"
-if [[ "${SHADOW_CMD}" -ne 0 ]]; then
-  echo "   FAIL: 影子节点出现在了真实控制话题上" >&2
+echo "== 3/4 影子命名空间是否出现在控制话题发布者名单（必须为 0）"
+if python3 scripts/onsite_control_audit.py > /dev/null 2>&1; then
+  echo "   OK：影子没有出现在任何控制话题发布者名单"
+else
+  echo "   FAIL: 影子节点出现在了真实控制话题上（详见上面 2/4）" >&2
   RC=2
 fi
 
@@ -63,7 +63,12 @@ python3 scripts/check_shadow_graph.py --duration 3 --expect-healthy "${EXTRA[@]}
 
 if [[ "${RC}" -ne 0 ]]; then
   echo
-  echo "== FAIL (rc=${RC})：先不要继续，把上面的输出回传"
+  echo "== FAIL (rc=${RC})：先不要继续。"
+  if [[ "${MODE}" == "motion" ]]; then
+    echo "   注意：motion 模式需要**先发目标**（python3 scripts/onsite_send_goal.py --frame odom --x 2 --y 0）。"
+  fi
+  echo "   下一步先跑：bash scripts/onsite_diagnose.sh（会打印 health 每通道原因、适配器拒绝日志、门控原因、控制话题拓扑）"
+  echo "   把诊断输出 + log/onsite/<时间戳>/report.txt 一起回传。"
 else
   echo
   echo "== PASS：影子只读、未接入真实控制入口（mode=${MODE}）"

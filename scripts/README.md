@@ -71,6 +71,9 @@
 | `onsite_record.sh` | 可选：录制现场所需话题与 TF 到 `log/onsite/<ts>/bag`；**校验 metadata 与消息数，异常/0 条返回非零** |
 | `check_onsite_report.py` | 校验采集报告：必需话题的消息数、`/tf_static` 是否收到、指定 TF 是否存在 |
 | `onsite_pause_inputs.py` | 暂停/恢复影子输入转发（配合 `input_gate:=true`），只影响 `/sentry_scan` |
+| `onsite_control_audit.py` | **只读拓扑审计**：精确区分控制话题的发布者/订阅者（`ros2 topic info -v` 的文本会用 grep 把订阅者误显示成发布者）；影子出现在发布者名单即失败 |
+| `onsite_health_dump.py` | **只读诊断**：打印 `/sentry_scan/health` 的原因字符串与每通道 `count/rejected/frame/age_s`；健康=0、不健康=2、收不到=3 |
+| `onsite_diagnose.sh` | 现场一条命令：健康原因 + 适配器拒绝日志 + 门控 CSV 原因 + 控制话题拓扑 + 最近采集报告 |
 | `spoof_external_node.py` | 测试替身：模拟实车原有节点（如 `/uart_node`）在运行，验证自检不误判 |
 
 流程与判据见 [在线影子运行手册](../docs/migration/onsite_shadow_runbook.md)。

@@ -129,6 +129,28 @@ python3 scripts/onsite_send_goal.py --path "0,0,0.0;2,0,0.0;2,2,0.0" --frame odo
 - **不要**使用 Nav2 面板的 "Nav2 Goal"、也不要手动发 `/goal_pose`、`/move_base_simple/goal`——
   那会驱动原有导航（本轮不做）。
 
+## 4.5 影子不健康时怎么查（现场一条命令）
+
+```bash
+git pull                      # 现场机器先更新到最新脚本
+bash scripts/onsite_diagnose.sh
+```
+
+输出依次给出：
+
+1. `/sentry_scan/health` 的**原因字符串**与每通道 `count / rejected / frame / age_s`
+   （`rejected` 增长而 `count` 不增长 = 该通道被拒；`age_s=n/a` = 从未收到；`age_s` 偏大 = 中断或时间戳尺度不符）；
+2. 适配器最近的拒绝原因（`log/shadow/*/launch.log`）；
+3. 门控最近的原因（`log/shadow/shadow_*.csv` 尾部）；
+4. **控制话题的发布者/订阅者**（用 `onsite_control_audit.py` 精确区分——不要用
+   `ros2 topic info -v | grep`，它会把订阅者 `uart_node` 误显示成发布者）；
+5. 最近一次采集报告的头部。
+
+若第 2 步显示 `velocity_frame_unresolved(world)`：这是**设计内的降级**（`/LIVO2/imu_propagate`
+的 `header.frame_id` 是 `world`，若 `world` 与规划系之间没有 TF，就没有可信的速度方向）。
+它不会让 `health_ok` 变 false，但会让候选速度恒为零；确认 `world`↔规划系关系后才考虑
+`velocity_frame_alias`。
+
 ## 5. 检查 SCAN 没有发布真实控制命令
 
 ```bash
