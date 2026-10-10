@@ -58,6 +58,14 @@ if(BUILD_TESTING)
   target_include_directories(test_cmd_gate_logic PRIVATE src)
   ament_target_dependencies(test_cmd_gate_logic
     rclcpp geometry_msgs std_msgs scan_planner_msgs)
+
+  # 点云布局反例（缺字段/错类型/截断/大端/行跨度/offset/count）
+  ament_add_gtest(test_cloud_layout_logic test/test_cloud_layout_logic.cpp)
+  target_include_directories(test_cloud_layout_logic PRIVATE src)
+  ament_target_dependencies(test_cloud_layout_logic
+    rclcpp sensor_msgs nav_msgs geometry_msgs diagnostic_msgs std_msgs
+    tf2 tf2_ros tf2_geometry_msgs pcl_conversions)
+  target_link_libraries(test_cloud_layout_logic ${PCL_LIBRARIES})
 endif()
 
 install(DIRECTORY launch config

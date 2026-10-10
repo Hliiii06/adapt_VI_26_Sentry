@@ -1,8 +1,0 @@
-{
-  "package_name": "scan_planner_msgs",
-  "non_idl_tuples": [
-    "/home/hzq/nav/adapt_VI_26_Sentry/src/planner/scan_planner_msgs:msg/Bspline.msg",
-    "/home/hzq/nav/adapt_VI_26_Sentry/src/planner/scan_planner_msgs:msg/DataDisp.msg",
-    "/home/hzq/nav/adapt_VI_26_Sentry/src/planner/scan_planner_msgs:msg/TaskAuthorization.msg"
-  ]
-}

@@ -91,6 +91,7 @@ class FakeRmInputs(Node):
         self._nan_started = False
         self._heartbeat_cut = False
         self._pending_tf = []
+        self._frozen_heartbeat_stamp = None
         self._flood_pub = None
 
         self.dyn_tf = TransformBroadcaster(self)
@@ -167,6 +168,8 @@ class FakeRmInputs(Node):
 
     def on_heartbeat(self):
         elapsed = self.elapsed()
+        if self.args.frozen_map_stamp and self._frozen_heartbeat_stamp is None:
+            self._frozen_heartbeat_stamp = self.get_clock().now().to_msg()
         if elapsed > self.args.fake_map_heartbeat_until:
             resuming = (self.args.fake_map_heartbeat_resume
                         and elapsed > self.args.fake_map_heartbeat_resume)
@@ -175,7 +178,8 @@ class FakeRmInputs(Node):
                 return
             self.mark("map_heartbeat_resume")
         msg = Header()
-        msg.stamp = self.get_clock().now().to_msg()
+        msg.stamp = (self._frozen_heartbeat_stamp if self.args.frozen_map_stamp
+                     else self.get_clock().now().to_msg())
         msg.frame_id = "odom"
         self._heartbeat_pub.publish(msg)
 
@@ -425,6 +429,8 @@ def main(argv=None):
     parser.add_argument("--repeat-old-stamp", action="store_true")
     parser.add_argument("--stamp-backwards-after", type=float, default=0.0)
     parser.add_argument("--freeze-stamp-after", type=float, default=0.0)
+    parser.add_argument("--frozen-map-stamp", action="store_true",
+                        help="心跳持续发送但 stamp 固定在启动时刻（源时间戳过期反例）")
     parser.add_argument("--fake-map-heartbeat-until", type=float, default=0.0)
     parser.add_argument("--fake-map-heartbeat-resume", type=float, default=0.0)
     parser.add_argument("--second-goal-after", type=float, default=0.0)

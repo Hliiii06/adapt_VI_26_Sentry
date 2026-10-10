@@ -44,18 +44,33 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 SCENARIO="${1:-no_inputs}"
+# 显式选择安装目录（隔离安装验证）：SHADOW_INSTALL_DIR=/path/install_cpp bash scripts/test_shadow_entry.sh mode1_goal
+SHADOW_INSTALL_DIR="${SHADOW_INSTALL_DIR:-${REPO_ROOT}/install}"
 DOMAIN="${SHADOW_DOMAIN_ID:-73}"
 STARTUP_WAIT="${SHADOW_STARTUP_WAIT:-10}"
 
-if [[ ! -f "${REPO_ROOT}/install/setup.bash" ]]; then
-  echo "未找到 install/setup.bash，请先运行 scripts/build.sh" >&2
+if [[ ! -f "${SHADOW_INSTALL_DIR}/setup.bash" ]]; then
+  echo "未找到 ${SHADOW_INSTALL_DIR}/setup.bash，请先运行 scripts/build.sh" >&2
   exit 1
 fi
 
 set +u
 source /opt/ros/humble/setup.bash
-source "${REPO_ROOT}/install/setup.bash"
+source "${SHADOW_INSTALL_DIR}/setup.bash"
 set -u
+
+# 记录实际解析到的包路径（隔离安装验证的关键证据；解析到别处直接失败）
+ADAPTER_PREFIX="$(ros2 pkg prefix sentry_scan_adapter_cpp 2>/dev/null || echo MISSING)"
+PLANNER_PREFIX="$(ros2 pkg prefix scan_planner 2>/dev/null || echo MISSING)"
+MSGS_PREFIX="$(ros2 pkg prefix scan_planner_msgs 2>/dev/null || echo MISSING)"
+echo "SHADOW_INSTALL_DIR=${SHADOW_INSTALL_DIR}"
+echo "sentry_scan_adapter_cpp: ${ADAPTER_PREFIX}"
+echo "scan_planner:            ${PLANNER_PREFIX}"
+echo "scan_planner_msgs:       ${MSGS_PREFIX}"
+case "${ADAPTER_PREFIX}" in
+  "${SHADOW_INSTALL_DIR}"/*) ;;
+  *) echo "FAIL: 适配包不是从 ${SHADOW_INSTALL_DIR} 解析的（实际 ${ADAPTER_PREFIX}）" >&2; exit 2 ;;
+esac
 export ROS_DOMAIN_ID="${DOMAIN}"
 export ROS_HOME="${REPO_ROOT}/log/ros"
 
@@ -132,7 +147,7 @@ LAUNCH_ARGS=()
 case "${SCENARIO}" in
   mode2_waypoints) LAUNCH_ARGS=(navi_mode:=2 "keypoints_file:=${SHARE}/shadow_test_waypoints.yaml") ;;
   mode3_path)      LAUNCH_ARGS=(navi_mode:=3 "reference_path_file:=${SHARE}/shadow_test_reference_path.yaml") ;;
-  map_gate|map_relatch|map_relatch_newtask)
+  map_gate|map_relatch|map_relatch_newtask|map_stamp_stale)
                    LAUNCH_ARGS=(map_update_topic:=test/map_heartbeat) ;;
   input_pause_gate) LAUNCH_ARGS=(input_gate:=true) ;;
   cpp_*)           LAUNCH_ARGS=(adapter_impl:=cpp) ;;
@@ -387,6 +402,17 @@ case "${SCENARIO}" in
     stop_check 11 30 --expect-healthy-after 15
     if [[ "${RC}" -eq 0 ]] && ! grep -q "LATCHING" "${LOG_DIR}/launch.log"; then
       echo "FAIL: 地图停更没有触发撤销+锁止日志" >&2
+      RC=2
+    fi
+    ;;
+  map_stamp_stale)
+    # 反例：心跳持续发送但 stamp 固定过期 —— 只查接收年龄会误判，必须停车
+    # 必须让心跳真的持续发布（--fake-map-heartbeat-until 很大），只把 stamp 冻结
+    run_fake --duration 60 --send-goal --frozen-map-stamp --fake-map-heartbeat-until 999
+    sleep 8
+    python3 scripts/check_shadow_graph.py --duration 10 --expect-zero || RC=$?
+    if [[ "${RC}" -eq 0 ]] && ! grep -q "map_update_stamp_stale" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 未按源时间戳判定地图过期（应出现 map_update_stamp_stale）" >&2
       RC=2
     fi
     ;;

@@ -48,6 +48,46 @@ using namespace std::chrono_literals;
 
 namespace sentry_scan_adapter_cpp {
 
+// 点云布局校验（与 Python 版逐条对应）：不能只靠 pcl::fromROSMsg —— PCL 对缺少 xyz 字段的
+// 消息只打印警告并返回 (0,0,0) 点，足以骗过"有限点数"检查。先校验再转换。
+inline std::string validate_cloud_layout(const sensor_msgs::msg::PointCloud2 &msg) {
+  if (msg.is_bigendian) {
+    return "unsupported layout: is_bigendian=true";
+  }
+  if (msg.width == 0 || msg.height == 0) {
+    return "empty cloud";
+  }
+  if (msg.point_step < 12) {
+    return "point_step=" + std::to_string(msg.point_step) + " < 12";
+  }
+  if (msg.row_step < msg.width * msg.point_step) {
+    return "row_step < width*point_step";
+  }
+  if (static_cast<std::size_t>(msg.height) * msg.row_step > msg.data.size()) {
+    return "data shorter than height*row_step (truncated)";
+  }
+  std::map<std::string, const sensor_msgs::msg::PointField *> found;
+  for (const auto &field : msg.fields) {
+    if (field.name != "x" && field.name != "y" && field.name != "z") {
+      continue;
+    }
+    if (field.datatype != sensor_msgs::msg::PointField::FLOAT32) {
+      return "field " + field.name + " is not FLOAT32";
+    }
+    if (field.count != 1) {
+      return "field " + field.name + " count != 1";
+    }
+    if (static_cast<int>(field.offset) + 4 > static_cast<int>(msg.point_step)) {
+      return "field " + field.name + " offset exceeds point_step";
+    }
+    found[field.name] = &field;
+  }
+  if (found.size() != 3) {
+    return "missing x/y/z fields";
+  }
+  return "";
+}
+
 struct Channel {
   std::string name;
   long count = 0;
@@ -424,8 +464,14 @@ class RmInputAdapter : public rclcpp::Node {
       reject(channel, "empty point cloud");
       return;
     }
-    // PCL 直接解析任意字段布局（现场为 48 字节 PCL 风格：x@0 y@4 z@8 normal_*@16..24
-    // intensity@32 curvature@36），不需要 Python 版 do_transform_cloud 的 dtype 约束。
+    // 先做布局校验（缺字段/错类型/截断/大端一律拒绝），再交给 PCL 解析。
+    // 现场为 48 字节 PCL 风格（x@0 y@4 z@8 normal_*@16..24 intensity@32 curvature@36），
+    // 字段间有空洞是允许的；这里只拒绝"不可信"的布局。
+    const std::string layout_error = validate_cloud_layout(*msg);
+    if (!layout_error.empty()) {
+      reject(channel, "point cloud layout unsupported: " + layout_error);
+      return;
+    }
     pcl::PointCloud<pcl::PointXYZ> cloud;
     try {
       pcl::fromROSMsg(*msg, cloud);
@@ -614,9 +660,11 @@ class RmInputAdapter : public rclcpp::Node {
 
 }  // namespace sentry_scan_adapter_cpp
 
+#ifndef RM_INPUT_ADAPTER_UNIT_TEST
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<sentry_scan_adapter_cpp::RmInputAdapter>());
   rclcpp::shutdown();
   return 0;
 }
+#endif

@@ -1,1 +1,0 @@
-/home/hzq/nav/adapt_VI_26_Sentry/build_cpp/scan_planner_msgs/rosidl_generator_py/scan_planner_msgs/_scan_planner_msgs_s.ep.rosidl_typesupport_introspection_c.c

@@ -106,6 +106,17 @@ TEST_F(CmdGateTest, StaleMapStops) {
   EXPECT_EQ(state, "zero(map-stale)");
 }
 
+TEST_F(CmdGateTest, StaleMapSourceStampStops) {
+  // 心跳持续到达但 header.stamp 过期：不能当"地图新鲜"
+  const double now = node_->now_s();
+  node_->map_recv_ = now;
+  node_->map_stamp_ = now - 5.0;
+  auto [publish, command, state] = node_->decide();
+  EXPECT_TRUE(publish);
+  EXPECT_DOUBLE_EQ(command.linear.x, 0.0);
+  EXPECT_EQ(state, "zero(map-stamp-stale)");
+}
+
 TEST_F(CmdGateTest, NonFiniteCandidateStops) {
   node_->candidate_.linear.x = std::nan("");
   auto [publish, command, state] = node_->decide();

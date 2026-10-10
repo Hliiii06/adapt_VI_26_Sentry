@@ -33,9 +33,21 @@
 - 另修两项移植遗漏：随 Python 包被删的两个测试 YAML（`shadow_test_waypoints.yaml`、
   `shadow_test_reference_path.yaml`）已恢复到 C++ 包 `config/`；
   C++ `task_adapter` 的空/未知 frame 拒绝日志措辞与既有反例判据对齐（保留原覆盖，未删测试）。
-- **未完成**：隔离 install（`install_cpp/`）只单独构建了适配包，端到端链路在隔离目录下尚未跑通
-  （无 guard CSV），需在下一步补齐；`docs/testing/shadow_acceptance.md` 仍是 Python 时代的场景描述，
-  待按 C++ 版本重写。
+- **五轮审查 5 项已收尾（2026-10-10）**：
+  ① 恢复点云布局校验（xyz 字段存在/FLOAT32/count=1/偏移/大小端/row_step/data 长度），
+  早于 PCL 解析 —— 反例 gtest `test_cloud_layout_logic` 7/7 通过（含"只有 intensity、没有 xyz"
+  这种 PCL 会给 (0,0,0) 点骗过计数的情况）；
+  ② `shadow_guard` 与 `cmd_gate` 恢复**地图源时间戳**检查（持续收到旧 stamp 的心跳不算新鲜），
+  新增反例场景 `map_stamp_stale`（心跳持续但 stamp 冻结 → 停车）与 gate 单测 12/12；
+  ③ 恢复**影子运行时图隔离检查**（周期查询 `/cmd_vel`、`/cmd_vel_remap` 发布者，只判定影子命名空间，
+  外部 Nav2/UART 并存；查询失败计入 `graph_violation` 而非"安全"），CSV 列不再是固定初值；
+  ④ 测试入口支持 `SHADOW_INSTALL_DIR` 显式选择安装目录，并在启动前记录适配/规划/消息包的实际解析路径，
+  解析到别处直接失败；用 `install_cpp/`（干净、10 包全建）跑 `mode1_goal` **PASS**，三个包均解析自
+  `install_cpp`；
+  ⑤ `.gitignore` 增加 `build_cpp/`、`install_cpp/`、`log_cpp/`，`git rm -r --cached` 停止跟踪
+  （本地文件保留；839 个构建产物移出跟踪）。公开仓库历史敏感信息扫描仍为无命中，未强推改写。
+- **未完成**：`docs/testing/shadow_acceptance.md` 仍混有 Python 时代场景描述，待按 C++ 版本重写；
+  完整 30+ 场景矩阵需要在 C++ 栈上重跑。
 
 ## 2026-10-10：现场第二次故障（云被拒 + RViz 空白）修复
 

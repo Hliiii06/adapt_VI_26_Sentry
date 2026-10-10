@@ -43,6 +43,7 @@ class ShadowGuard : public rclcpp::Node {
     zero_yaw_candidate_ = declare_parameter<bool>("zero_yaw_candidate", true);
     output_rate_ = declare_parameter<double>("output_rate", 20.0);
     record_ = declare_parameter<bool>("record", true);
+    graph_check_period_ = declare_parameter<double>("graph_check_period", 1.0);
     log_dir_ = declare_parameter<std::string>("log_dir", "log/shadow");
 
     auto latch = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
@@ -60,8 +61,11 @@ class ShadowGuard : public rclcpp::Node {
         body_pose_topic_, 10,
         [this](nav_msgs::msg::Odometry::SharedPtr) { body_recv_ = now_s(); });
     map_sub_ = create_subscription<std_msgs::msg::Header>(
-        cloud_update_topic_, 10, [this](std_msgs::msg::Header::SharedPtr) {
+        cloud_update_topic_, 10, [this](std_msgs::msg::Header::SharedPtr msg) {
           map_recv_ = now_s();
+          // 源时间戳同样要新鲜：持续收到旧 stamp 的心跳不能算"地图在更新"
+          map_stamp_ = static_cast<double>(msg->stamp.sec) +
+                       static_cast<double>(msg->stamp.nanosec) * 1e-9;
           map_ever_fresh_ = true;
         });
     task_sub_ = create_subscription<scan_planner_msgs::msg::TaskAuthorization>(
@@ -72,6 +76,8 @@ class ShadowGuard : public rclcpp::Node {
     reset_pub_ = create_publisher<std_msgs::msg::Bool>("planning/reset", 10);
     timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / output_rate_),
                                [this]() { tick(); });
+    graph_timer_ = create_wall_timer(std::chrono::duration<double>(graph_check_period_),
+                                     [this]() { check_graph(); });
     if (record_) {
       open_csv();
     }
@@ -119,7 +125,40 @@ class ShadowGuard : public rclcpp::Node {
     if (map_recv_ <= 0.0 || (now - map_recv_) > max_map_age_) {
       return "map_update_stale";
     }
+    if (map_stamp_ > 0.0 && (now - map_stamp_) > max_map_age_) {
+      return "map_update_stamp_stale";
+    }
     return "";
+  }
+
+  // 影子运行时的图隔离检查：允许外部 Nav2/UART 并存，只判定**影子命名空间**的
+  // 违规控制发布者；图查询失败不能记成"安全"。
+  void check_graph() {
+    const std::string own_ns = std::string(get_namespace());
+    int external = 0;
+    std::string violation;
+    for (const auto &topic : {std::string("/cmd_vel"), std::string("/cmd_vel_remap")}) {
+      try {
+        for (const auto &info : get_publishers_info_by_topic(topic)) {
+          std::string namespace_ = info.node_namespace();
+          while (!namespace_.empty() && namespace_.back() == '/') {
+            namespace_.pop_back();
+          }
+          if (namespace_ == own_ns) {
+            violation = topic + " published by shadow node " + info.node_name();
+          } else {
+            external++;
+          }
+        }
+      } catch (const std::exception &exc) {
+        violation = "graph query failed for " + topic + ": " + exc.what();
+      }
+    }
+    external_publishers_ = external;
+    graph_violation_ = violation;
+    if (!violation.empty()) {
+      RCLCPP_ERROR(get_logger(), "shadow graph violation: %s", violation.c_str());
+    }
   }
 
   void publish_reset(const std::string &reason) {
@@ -163,6 +202,9 @@ class ShadowGuard : public rclcpp::Node {
   std::pair<geometry_msgs::msg::Twist, std::string> decide() {
     geometry_msgs::msg::Twist zero;
     const double now = now_s();
+    if (!graph_violation_.empty()) {
+      return {zero, "graph_violation"};
+    }
     const std::string stale = map_stale_reason(now);
     if (!stale.empty() && map_ever_fresh_ && task_active_ && !map_latched_) {
       map_latched_ = true;
@@ -223,8 +265,7 @@ class ShadowGuard : public rclcpp::Node {
            << candidate_.linear.x << ',' << candidate_.linear.y << ',' << candidate_.angular.z
            << ',' << command.linear.x << ',' << command.linear.y << ',' << command.angular.z
            << ',' << (map_recv_ > 0.0 ? now - map_recv_ : -1.0) << ',' << (map_latched_ ? 1 : 0)
-           << ',' << external_publishers_ << ","
-           << "\n";
+           << ',' << external_publishers_ << ',' << graph_violation_ << '\n';
     }
   }
 
@@ -234,7 +275,9 @@ class ShadowGuard : public rclcpp::Node {
   double max_vx_{}, max_vy_{}, max_wz_{}, output_rate_{};
   bool zero_yaw_candidate_{}, record_{};
   bool health_{false}, map_ever_fresh_{false}, map_latched_{false}, task_active_{false};
-  double health_recv_{0.0}, body_recv_{0.0}, map_recv_{0.0}, candidate_recv_{0.0}, last_revoke_{0.0};
+  double health_recv_{0.0}, body_recv_{0.0}, map_recv_{0.0}, map_stamp_{0.0};
+  double candidate_recv_{0.0}, last_revoke_{0.0}, graph_check_period_{1.0};
+  std::string graph_violation_;
   unsigned int last_task_id_{0}, latched_task_id_{0};
   long samples_{0};
   int external_publishers_{0};
@@ -242,7 +285,7 @@ class ShadowGuard : public rclcpp::Node {
   std::ofstream csv_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr shadow_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr reset_pub_;
-  rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr timer_, graph_timer_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr health_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr candidate_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr body_sub_;

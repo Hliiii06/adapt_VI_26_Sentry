@@ -56,8 +56,10 @@ class CmdGate : public rclcpp::Node {
         task_active_topic_, latch,
         [this](scan_planner_msgs::msg::TaskAuthorization::SharedPtr msg) { on_task(msg); });
     map_sub_ = create_subscription<std_msgs::msg::Header>(
-        map_update_topic_, 10, [this](std_msgs::msg::Header::SharedPtr) {
+        map_update_topic_, 10, [this](std_msgs::msg::Header::SharedPtr msg) {
           map_recv_ = now_s();
+          map_stamp_ = static_cast<double>(msg->stamp.sec) +
+                       static_cast<double>(msg->stamp.nanosec) * 1e-9;
         });
     reset_sub_ = create_subscription<std_msgs::msg::Bool>(
         "planning/reset", 10,
@@ -155,6 +157,9 @@ class CmdGate : public rclcpp::Node {
     if (map_recv_ <= 0.0 || (now - map_recv_) > max_map_age_) {
       return {true, zero, "zero(map-stale)"};
     }
+    if (map_stamp_ > 0.0 && (now - map_stamp_) > max_map_age_) {
+      return {true, zero, "zero(map-stamp-stale)"};
+    }
     if (candidate_recv_ <= 0.0 || (now - candidate_recv_) > candidate_timeout_) {
       return {true, zero, "zero(candidate-stale)"};
     }
@@ -203,7 +208,7 @@ class CmdGate : public rclcpp::Node {
   bool armed_{false}, ever_armed_{false}, authorized_{false};
   unsigned int last_task_id_{0}, cancelled_task_id_{0};
   int health_{0};
-  double health_recv_{0.0}, map_recv_{0.0}, candidate_recv_{0.0};
+  double health_recv_{0.0}, map_recv_{0.0}, map_stamp_{0.0}, candidate_recv_{0.0};
   geometry_msgs::msg::Twist candidate_;
   std::string last_state_;
 

@@ -1,1 +1,0 @@
-/home/hzq/nav/adapt_VI_26_Sentry/build_cpp/scan_planner_msgs/rosidl_generator_cpp/scan_planner_msgs/msg/detail/bspline__traits.hpp

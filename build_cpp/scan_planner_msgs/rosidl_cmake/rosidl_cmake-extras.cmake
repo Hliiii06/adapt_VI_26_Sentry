@@ -1,4 +1,0 @@
-# generated from rosidl_cmake/cmake/rosidl_cmake-extras.cmake.in
-
-set(scan_planner_msgs_IDL_FILES "msg/Bspline.idl;msg/DataDisp.idl;msg/TaskAuthorization.idl")
-set(scan_planner_msgs_INTERFACE_FILES "msg/Bspline.msg;msg/DataDisp.msg;msg/TaskAuthorization.msg")
