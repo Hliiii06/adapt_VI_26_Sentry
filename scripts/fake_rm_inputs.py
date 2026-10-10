@@ -14,6 +14,10 @@
     --repeat-old-stamp       header.stamp 立刻固定不前进（旧消息重发）
     --freeze-stamp-after N   N 秒后把 header.stamp 固定（先正常运行再模拟旧 stamp 重发）
     --second-goal-after T   T 秒后再发一个目标（用于验证"新任务才恢复"）
+    --tf-after-odom          复现实车 TfTransformer 的顺序：先发 /Odometry_transformed，
+                             再广播**同 stamp** 的 odom→base_link（动态 TF 晚于消息到达）
+    --tf-delay-after-odom N  配合 --tf-after-odom：把动态 TF 延后 N 秒发布（默认 0.0），
+                             用来稳定复现"查询时 TF 还没进 buffer"（实车受调度/DDS 影响）
     --padded-cloud           发布带行填充的点云（point_step=16、row_step>width*point_step，
                              填充区写 (90,90,90)），用于验证适配层会先重排为密集布局
     --fake-map-heartbeat-until / --fake-map-heartbeat-resume
@@ -83,6 +87,7 @@ class FakeRmInputs(Node):
         self._cloud_stopped = False
         self._nan_started = False
         self._heartbeat_cut = False
+        self._pending_tf = []
         self._flood_pub = None
 
         self.dyn_tf = TransformBroadcaster(self)
@@ -132,6 +137,8 @@ class FakeRmInputs(Node):
         self.create_timer(0.02, self.on_velocity)
         self.create_timer(0.1, self.on_cloud)
         self.create_timer(0.5, self.on_events)
+        if args.tf_after_odom and args.tf_delay_after_odom > 0.0:
+            self.create_timer(0.01, self.flush_pending_tf)
         if args.send_goal:
             # 只发一次（重复发目标会在取消后重新授权新任务，使"取消后不动"的判据失真），
             # 但必须等订阅端出现再发：DDS 发现未完成时单次发布会被丢掉，导致场景偶发"无运动"。
@@ -248,8 +255,9 @@ class FakeRmInputs(Node):
             self.mark("tf_stop")
             return
         stamp = self.stamp()
-        self.dyn_tf.sendTransform(
-            _tf("odom", "base_link", (0.0, 0.0, 0.1), _quat_from_yaw(0.0), stamp))
+        if not self.args.tf_after_odom:
+            self.dyn_tf.sendTransform(
+                _tf("odom", "base_link", (0.0, 0.0, 0.1), _quat_from_yaw(0.0), stamp))
         dx, dy, dyaw = self.map_odom_offset
         offset = (dx + self.jump_offset[0], dy + self.jump_offset[1], self.jump_offset[2])
         self.dyn_tf.sendTransform(
@@ -266,6 +274,26 @@ class FakeRmInputs(Node):
         msg.pose.pose.position.z = 0.1
         msg.pose.pose.orientation.w = 1.0
         self.odom_pub.publish(msg)
+        if self.args.tf_after_odom:
+            # 与实车一致：消息先发，动态 TF 晚于消息（可加延迟以稳定复现调度/DDS 差异）
+            if self.args.tf_delay_after_odom > 0.0:
+                due = self.get_clock().now().nanoseconds * 1e-9 + self.args.tf_delay_after_odom
+                self._pending_tf.append((due, msg.header.stamp))
+            else:
+                self.dyn_tf.sendTransform(
+                    _tf("odom", "base_link", (0.0, 0.0, 0.1), _quat_from_yaw(0.0),
+                        msg.header.stamp))
+
+    def flush_pending_tf(self):
+        now = self.get_clock().now().nanoseconds * 1e-9
+        still = []
+        for when, stamp in self._pending_tf:
+            if now >= when:
+                self.dyn_tf.sendTransform(
+                    _tf("odom", "base_link", (0.0, 0.0, 0.1), _quat_from_yaw(0.0), stamp))
+            else:
+                still.append((when, stamp))
+        self._pending_tf = still
 
     def on_velocity(self):
         msg = Odometry()
@@ -376,6 +404,8 @@ def main(argv=None):
     parser.add_argument("--stop-tf-after", type=float, default=0.0)
     parser.add_argument("--mismatch-pairing", action="store_true")
     parser.add_argument("--padded-cloud", action="store_true")
+    parser.add_argument("--tf-after-odom", action="store_true")
+    parser.add_argument("--tf-delay-after-odom", type=float, default=0.0)
     parser.add_argument("--resume-cloud-after", type=float, default=0.0)
     parser.add_argument("--nan-cloud-after", type=float, default=0.0)
     parser.add_argument("--flood-stale-sensor-pose-after", type=float, default=0.0)

@@ -29,7 +29,13 @@
     max_future_stamp: 0.05        # 未来时间戳容差；超过即拒绝且不写入历史
     min_valid_points: 10          # 点云必须有至少这么多有限 xyz 点，否则拒绝该帧
     tf_lookup_timeout: 0.0      # 非阻塞；>0 会在单线程 executor 里阻塞 TF 订阅
-    tf_future_tolerance: 0.05   # 消息与 TF 同时到达时允许用最新 TF 顶替的最大偏差
+    tf_future_tolerance: 0.15   # 允许用最新 TF 顶替的最大偏差。实测：/Odometry_transformed
+                                # 9.95 Hz（周期 0.1005 s）且 TfTransformer 先发消息、
+                                # 后广播同 stamp 的 odom→base_link，按消息时刻查询必然
+                                # 缺最新样本；0.05 会让 sensor_pose/云路径持续被拒。
+                                # 0.15 = 一个周期 + 余量（查询延迟记录在 tf.last_lookup_delay_s）
+    odom_in_planning_frame: true  # 里程计已在规划系时直接用其位姿（真实 TfTransformer
+                                  # 先发 /Odometry_transformed、再广播同 stamp 的 odom→base_link）
     require_tf: true
     cloud_assume_planning_frame: false   # true 时不再对 cloud 做 TF（仅当确认云已在规划系）
 
@@ -55,6 +61,7 @@
     path_out_topic: initial_path     # FSM Mode 3 的输入，已转换到规划系
     tf_lookup_timeout: 0.0
     tf_future_tolerance: 0.05
+    odom_in_planning_frame: true   # 同上：任务适配层不需要，保留以便对照
     max_source_age: 1.0
     max_future_stamp: 0.05
     empty_frame_is_planning: false   # 只有确认发布者真的用规划系时才置 true

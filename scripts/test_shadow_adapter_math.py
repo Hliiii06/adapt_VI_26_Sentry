@@ -11,15 +11,16 @@ import sys
 import unittest
 
 import rclpy
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import Pose, Transform, TransformStamped
 from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
 from std_msgs.msg import Header
 
 from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
 
-from sentry_scan_adapter.rm_input_adapter import (RmInputAdapter, _count_finite_points,
-                                                  _densify_cloud, _pose_from_transform, _rotate)
+from sentry_scan_adapter.rm_input_adapter import (RmInputAdapter, _apply_transform_to_pose,
+                                                  _count_finite_points, _densify_cloud,
+                                                  _pose_from_transform, _quat_mul, _rotate)
 
 
 def _xyz_fields(offsets=(0, 4, 8), datatype=PointField.FLOAT32):
@@ -55,6 +56,10 @@ def _raw_cloud(fields, data, width, height, point_step, row_step, bigendian=Fals
     msg.data = data
     msg.is_dense = True
     return msg
+
+
+def _quat_from_yaw(yaw):
+    return (0.0, 0.0, math.sin(yaw * 0.5), math.cos(yaw * 0.5))
 
 
 def _tf(translation=(0.0, 0.0, 0.0), yaw=0.0):
@@ -257,6 +262,36 @@ class AdapterMathTest(unittest.TestCase):
         count_short, why_short = _count_finite_points(short)
         self.assertEqual(count_short, 0)
         self.assertTrue(why_short)
+
+    def test_pose_offset_composition_matches_static_tf(self):
+        # 里程计消息常在 base_footprint 参考点；到 base_link 的差异用静态 TF 修正。
+        yaw90 = _quat_from_yaw(math.pi / 2.0)
+        transform = Transform()
+        transform.translation.x, transform.translation.y, transform.translation.z = 1.0, 0.0, 0.0
+        transform.rotation.x, transform.rotation.y = yaw90[0], yaw90[1]
+        transform.rotation.z, transform.rotation.w = yaw90[2], yaw90[3]
+
+        pose = Pose()
+        pose.position.x, pose.position.y, pose.position.z = 1.0, 0.0, 0.0
+        pose.orientation.w = 1.0
+        out = _apply_transform_to_pose(transform, pose)
+        # p' = t + R·p = (1,0,0) + (0,1,0)
+        self.assertAlmostEqual(out.position.x, 1.0, places=6)
+        self.assertAlmostEqual(out.position.y, 1.0, places=6)
+        self.assertAlmostEqual(out.position.z, 0.0, places=6)
+        self.assertAlmostEqual(out.orientation.z, yaw90[2], places=6)
+        self.assertAlmostEqual(out.orientation.w, yaw90[3], places=6)
+
+        identity = Transform()
+        identity.rotation.w = 1.0
+        same = _apply_transform_to_pose(identity, pose)
+        self.assertAlmostEqual(same.position.x, 1.0, places=6)
+
+        # _quat_mul 单位元 + _rotate 接受序列（回归：曾因只接受 Quaternion 对象而崩溃）
+        self.assertEqual(_quat_mul((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)),
+                         (0.0, 0.0, 0.0, 1.0))
+        self.assertAlmostEqual(_rotate((0.0, 0.0, 0.0, 1.0), (1.0, 2.0, 3.0))[0], 1.0, places=6)
+        self.assertAlmostEqual(_rotate(yaw90, (1.0, 0.0, 0.0))[1], 1.0, places=6)
 
     def test_padded_cloud_survives_check_densify_and_transform(self):
         # 2 行 x 5 个真实点，point_step=16（xyz + 4 字节填充），row_step=88（每行尾部再填充 8 字节）；

@@ -3,6 +3,30 @@
 当前状态与最近变更。逐轮流水（S0–S3、Codex 各轮复审、修复过程）已移入
 [进展历史](../archive/progress_history.md)，失败证据与“用户验证/本轮实测”区别原样保留。
 
+## 2026-10-09（第二轮）：实车采集根因定位与修复
+
+- 在本机直接读原始采集目录后定位 `health_ok=False` 根因：RM `TfTransformer::odom_callback`
+  **先发 `/Odometry_transformed`、后广播同 stamp 的 `odom→base_link`**，而适配器按消息时刻查询该动态 TF，
+  只能回退到上一周期样本（≈0.1 s）> 当时的 `tf_future_tolerance=0.05` → odom 每帧被拒。
+- 修复（仅本仓库）：`odom_in_planning_frame`（默认 true）下直接用消息位姿、参考点差异用**静态** TF 修正；
+  `tf_future_tolerance` 按实测周期改为 0.15 s；新增位姿复合单测（adapter_math 14 项通过）。
+- 新增可复现场景：`odom_before_tf`（修复后健康+有速度、无 TF 拒绝）与
+  `odom_before_tf_legacy`（旧行为 `health_ok=False`、输出全零、日志出现 `needs future data`）。
+- 用户确认：TF 无 `world` 系（按不存在处理，速度保持降级为零）、SCAN 在 `odom` 规划、
+  IMU 取自 mid360 且雷达≈机体中心、允许第 7 项（`uart` 的 `twist_topic` 指向闸门输出）。
+- 仍 UNKNOWN：车辆几何中心与 `base_link` 的物理关系、碰撞包络实测尺寸、急停与 MCU 看门狗、
+  修复后现场 `health_ok` 是否转 true（需带修复重跑影子）。
+- 证据口径：修复后的完整矩阵 `final8` 跑到 **11/30** 时因现场机器断电中断（11 个全过），
+  另补跑 `mode1_goal`、`task_frame_transform` 通过 → 修复后已确认 **13/30**；剩余 17 个场景**待重跑**
+  （用户要求长任务先暂停，稍后再跑）。此前 `final7` 的 28/28 对应**修复前**代码。
+
+## 2026-10-09：首次实车采集资料离线分析
+
+- 用户提供 `collect_20261009_205335`，分析见[现场采集报告](../testing/onsite_field_2026-10-09.md)。
+- 已有真实输入证据：主要话题/TF 可见；`world` TF 未找到；TF 定义中 base_link 与 lidar_link 重合，机体几何中心仍待测量确认。
+- 本批没有影子节点/健康成功记录，控制审计与主采集报告矛盾；只能算输入摸底，不能算 I2 影子验收通过。
+- 本轮仅写文档，未构建、未启动 ROS、未操作实车、未修改导航参数或参考仓库。下文早期“未接实车”等状态须按各轮日期理解；当前仍未授权底盘接管。
+
 ## 2026-10-07：交接 A 仓库整理完成；交接 B 待批准
 
 用户决定暂停扩建仿真、恢复实车替换主线，并指定“先完成任务一，暂停汇报，批准后再做任务二”。

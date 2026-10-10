@@ -115,7 +115,10 @@ bash scripts/run_shadow_onsite.sh start_rviz:=true # 正式启动（前台；Ctr
 
 > `start_rviz` 默认是 **false**：要按第 3 节在 RViz 里对齐，必须显式加 `start_rviz:=true`。
 
-- 默认输入：`/Odometry_transformed`、`/LIVO2/imu_propagate`、`/cloud_registered`，规划系 `odom`；
+- 默认输入：`/Odometry_transformed`、`/LIVO2/imu_propagate`、`/cloud_registered`，规划系 `odom`
+  （2026-10-09 现场已确认：SCAN 在 `odom` 规划；TF 不使用 `world`，速度保持降级为零）；
+- 关键参数：`odom_in_planning_frame:=true`（默认，实车 `TfTransformer` 先发 odom 后发 TF）、
+  `tf_future_tolerance:=0.15`（按实测 9.95 Hz 动态 TF 周期定）；
 - 若 §0 实测发现话题/命名空间不同，用环境变量覆盖后重启：
   `ODOM_TOPIC=... VELOCITY_TOPIC=... CLOUD_TOPIC=... PLANNING_FRAME=... bash scripts/run_shadow_onsite.sh`
 - 无界面：`bash scripts/run_shadow_onsite.sh start_rviz:=false`；
@@ -179,6 +182,24 @@ bash scripts/onsite_diagnose.sh
 的 `header.frame_id` 是 `world`，若 `world` 与规划系之间没有 TF，就没有可信的速度方向）。
 它不会让 `health_ok` 变 false，但会让候选速度恒为零；确认 `world`↔规划系关系后才考虑
 `velocity_frame_alias`。
+
+## 4.6 2026-10-09 已定位的现场故障（health_ok=False，已修）
+
+现象：影子节点都在、`/cmd_vel` 上没有影子发布者，但 `health_ok=False`、影子输出恒零。
+
+根因（源码 + 现场数据 + 本地复现）：RM `TfTransformer::odom_callback` **先发**
+`/Odometry_transformed`、**之后**广播同 stamp 的 `odom→base_link`；适配器按消息时刻查这个动态 TF，
+只能拿到上一周期样本（≈0.1 s），超过当时的容差 0.05 s → odom 每帧被拒。
+
+修复后现场应看到：
+
+```bash
+bash scripts/onsite_diagnose.sh
+# 期望：health_ok=True；odom.pose_source = message(child=base_footprint+static)；
+#       tf.last_lookup_delay_s 很小；没有 "needs future data"
+```
+
+若仍为 false，把 `原因:` 行、`odom.rejected`、`tf.last_lookup_delay_s`、`cloud.rejected` 一起回传。
 
 ## 5. 检查 SCAN 没有发布真实控制命令
 

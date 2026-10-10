@@ -15,6 +15,8 @@
 #   bash scripts/test_shadow_entry.sh external_uart_coexist # 实车 /uart_node 在跑时自检不误判
 #   bash scripts/test_shadow_entry.sh onsite_late_inputs    # 采集器后加入：补建订阅 + 收到静态 TF
 #   bash scripts/test_shadow_entry.sh input_pause_gate     # 暂停/恢复影子输入：停住且恢复不续跑
+#   bash scripts/test_shadow_entry.sh odom_before_tf       # 实车发布顺序：直通修复后健康+有速度
+#   bash scripts/test_shadow_entry.sh odom_before_tf_legacy # 关掉直通 -> 复现实车 health_ok=False
 #   bash scripts/test_shadow_entry.sh cloud_stop          # 云中断
 #   bash scripts/test_shadow_entry.sh odom_stop           # odom / TF 中断
 #   bash scripts/test_shadow_entry.sh tf_stop             # 仅动态 TF 中断
@@ -90,6 +92,7 @@ case "${SCENARIO}" in
   map_gate|map_relatch|map_relatch_newtask)
                    LAUNCH_ARGS=(map_update_topic:=test/map_heartbeat) ;;
   input_pause_gate) LAUNCH_ARGS=(input_gate:=true) ;;
+  odom_before_tf_legacy) LAUNCH_ARGS=(odom_in_planning_frame:=false tf_future_tolerance:=0.05) ;;
 esac
 
 LAUNCH_PGID=""
@@ -165,6 +168,29 @@ case "${SCENARIO}" in
     python3 scripts/check_shadow_graph.py --duration 10 --expect-healthy --expect-motion || RC=$?
     if [[ "${RC}" -eq 0 ]] && ! grep -q "repacked to a dense layout" "${LOG_DIR}/launch.log"; then
       echo "FAIL: 带行填充的点云没有被适配层重排为密集布局" >&2
+      RC=2
+    fi
+    ;;
+  odom_before_tf)
+    # 实车真实发布顺序：/Odometry_transformed 先发，同 stamp 的 odom→base_link 后广播。
+    # 修复后：里程计直接用消息位姿（静态 TF 修正参考点）；其余动态 TF 查询按实测周期容忍。
+    run_fake --duration 60 --send-goal --tf-after-odom --tf-delay-after-odom 0.03
+    sleep 4
+    python3 scripts/check_shadow_graph.py --duration 12 --expect-healthy --expect-motion || RC=$?
+    if [[ "${RC}" -eq 0 ]] && grep -q "needs future data" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 修复后仍出现 'needs future data' 的 TF 拒绝" >&2
+      grep -m3 "needs future data" "${LOG_DIR}/launch.log" >&2
+      RC=2
+    fi
+    ;;
+  odom_before_tf_legacy)
+    # 同场景但关掉直通（odom_in_planning_frame:=false）+ 容差恢复到旧的 0.05：
+    # 复现实车故障——按消息时刻查询只能拿到上一周期 TF（≈0.1s > 0.05s），每帧被拒、无候选速度。
+    run_fake --duration 60 --send-goal --tf-after-odom --tf-delay-after-odom 0.03
+    sleep 4
+    python3 scripts/check_shadow_graph.py --duration 12 --expect-zero || RC=$?
+    if [[ "${RC}" -eq 0 ]] && ! grep -q "needs future data" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 未复现 TF 拒绝（legacy 路径应出现 'needs future data'）" >&2
       RC=2
     fi
     ;;

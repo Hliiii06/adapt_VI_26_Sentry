@@ -61,7 +61,10 @@ def _quat_valid(q) -> bool:
 
 def _rotate(q, v: Sequence[float]) -> Tuple[float, float, float]:
     """用四元数 q（需已归一化）旋转向量 v。"""
-    x, y, z, w = q.x, q.y, q.z, q.w
+    if isinstance(q, (tuple, list)):
+        x, y, z, w = q
+    else:
+        x, y, z, w = q.x, q.y, q.z, q.w
     vx, vy, vz = v
     tx = 2.0 * (y * vz - z * vy)
     ty = 2.0 * (z * vx - x * vz)
@@ -153,6 +156,30 @@ def _densify_cloud(msg: PointCloud2) -> PointCloud2:
     return dense
 
 
+def _quat_mul(a: Sequence[float], b: Sequence[float]) -> Tuple[float, float, float, float]:
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz)
+
+
+def _apply_transform_to_pose(transform, pose: Pose) -> Pose:
+    """把父系下的位姿按 transform 平移到另一参考点：p' = t + R·p，q' = q_t · q。"""
+    q_t = transform.rotation
+    rotated = _rotate((q_t.x, q_t.y, q_t.z, q_t.w),
+                      (pose.position.x, pose.position.y, pose.position.z))
+    out = Pose()
+    out.position.x = rotated[0] + transform.translation.x
+    out.position.y = rotated[1] + transform.translation.y
+    out.position.z = rotated[2] + transform.translation.z
+    q = _quat_mul((q_t.x, q_t.y, q_t.z, q_t.w),
+                  (pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w))
+    out.orientation.x, out.orientation.y, out.orientation.z, out.orientation.w = q
+    return out
+
+
 def _pose_from_transform(transform) -> Pose:
     """TransformStamped.transform (Transform) -> geometry_msgs/Pose。"""
     pose = Pose()
@@ -233,6 +260,13 @@ class RmInputAdapter(Node):
         # 同一节点在同一回调里先广播 TF 再发布消息时，tf listener 可能还没收到该时刻的 TF；
         # 允许用"最新可用 TF"代替，但偏差必须在该容差内（配对语义仍然按消息时刻约束）。
         self.tf_future_tolerance = float(self.declare_parameter("tf_future_tolerance", 0.05).value)
+        # 里程计消息若**本身就在规划系**（header.frame_id == planning_frame），直接用它的位姿，
+        # 不去查"按消息时刻"的动态 TF。原因：真实 TfTransformer 先发 /Odometry_transformed、
+        # 再广播同 stamp 的 odom→base_link，查询时该 TF 还没进 buffer，只能拿到上一周期
+        # （≈0.1 s 前）的样本，超过 tf_future_tolerance 后每帧都被拒 → health_ok 恒 false。
+        # child_frame_id 与 body_frame 的差异用**静态** TF 修正（与发布顺序无关）。
+        self.odom_in_planning_frame = bool(
+            self.declare_parameter("odom_in_planning_frame", True).value)
         self.require_tf = bool(self.declare_parameter("require_tf", True).value)
         self.cloud_assume_planning_frame = bool(
             self.declare_parameter("cloud_assume_planning_frame", False).value)
@@ -405,6 +439,20 @@ class RmInputAdapter(Node):
         if not _finite(pose.position.x, pose.position.y, pose.position.z) or not _quat_valid(pose.orientation):
             self._reject(channel, "non-finite position or invalid quaternion")
             return
+        if self.odom_in_planning_frame and msg.header.frame_id == self.planning_frame:
+            # 消息已在规划系：直接用它的位姿（不再依赖"先发消息、后发 TF"的动态查询）。
+            pose, note = self._body_pose_from_odom(msg, stamp_s)
+            if pose is None:
+                return
+            self._mark_tf_channel_valid("odom-message(%s)" % note, 0.0)
+            channel.last_receive = recv_s
+            channel.last_valid = recv_s
+            channel.last_frame = self.planning_frame
+            channel.error = ""
+            channel.extra["pose_source"] = "message(%s)" % note
+            self._emit_body_pose(pose, stamp_s)
+            return
+
         tf = self._lookup(self.planning_frame, self.body_frame, stamp_s, allow_future=True)
         if tf is None:
             return
@@ -412,7 +460,34 @@ class RmInputAdapter(Node):
         channel.last_valid = recv_s
         channel.last_frame = self.planning_frame
         channel.error = ""
+        channel.extra["pose_source"] = "tf(%s<-%s)" % (self.planning_frame, self.body_frame)
         self.publish_body_pose(tf, stamp_s)
+
+    def _body_pose_from_odom(self, msg: Odometry, stamp_s: float):
+        """消息位姿 -> body_frame 位姿；参考点差异用静态 TF（Time(0)）修正。"""
+        pose = Pose()
+        pose.position = msg.pose.pose.position
+        pose.orientation = msg.pose.pose.orientation
+        child = msg.child_frame_id or self.body_frame
+        if child == self.body_frame:
+            return pose, "child=%s" % child
+        static_tf = self._lookup(self.body_frame, child, 0.0, allow_future=False, required=False)
+        if static_tf is None:
+            # 静态外参不可得时不静默丢弃：按原样使用并记录备注（当前平台两者相差厘米级）。
+            self.channels["odom"].extra["pose_source_note"] = (
+                "静态 %s<-%s 不可得；按消息原样使用" % (self.body_frame, child))
+            return pose, "child=%s(no-static)" % child
+        return _apply_transform_to_pose(static_tf.transform, pose), "child=%s+static" % child
+
+    def _mark_tf_channel_valid(self, label: str, delay: float) -> None:
+        channel = self.channels["tf"]
+        channel.count += 1
+        channel.last_valid = self._now_s()
+        channel.last_receive = channel.last_valid
+        channel.last_frame = label
+        channel.extra["last_lookup_delay_s"] = "%.4f" % delay
+        if not self.jump_reason:
+            channel.error = ""
 
     def on_velocity(self, msg: Odometry) -> None:
         channel = self.channels["velocity"]
@@ -497,7 +572,9 @@ class RmInputAdapter(Node):
 
     # --------------------------------------------------------------- 输出组装
     def publish_body_pose(self, tf, stamp_s: float) -> None:
-        pose = _pose_from_transform(tf.transform)
+        self._emit_body_pose(_pose_from_transform(tf.transform), stamp_s)
+
+    def _emit_body_pose(self, pose: Pose, stamp_s: float) -> None:
         if any(abs(v) > 0.0 for v in self.body_center_offset):
             ox, oy, oz = _rotate(pose.orientation, self.body_center_offset)
             pose.position.x += ox

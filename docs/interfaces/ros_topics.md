@@ -150,6 +150,23 @@ uint32 task_id
 详见[模式边界、六航点与证据](../testing/mode2_waypoint_z_preview.md)。
 
 
+## 现场实测（2026-10-09，实车静止；用户提供的采集数据）
+
+| 话题 | 类型 | frame | 实测频率 | stamp 年龄 | 发布端 QoS |
+|---|---|---|---:|---:|---|
+| `/Odometry_transformed` | `nav_msgs/msg/Odometry` | `odom` | 9.95 Hz | 0.049 s | Best Effort / Volatile |
+| `/Odometry` | `nav_msgs/msg/Odometry` | `camera_init` | 9.79 Hz | 0.049 s | Reliable / Volatile |
+| `/LIVO2/imu_propagate` | `nav_msgs/msg/Odometry` | `world`（**不在 TF 中**） | 175.4 Hz | 0.004 s | Reliable / Volatile |
+| `/cloud_registered` | `sensor_msgs/msg/PointCloud2` | `camera_init` | 8.89 Hz（另一窗口 6.7–7.3，最大间隔 0.400 s） | 0.043 s | Reliable / Volatile |
+| `/pointcloud` | `sensor_msgs/msg/PointCloud2` | `base_footprint` | 8.66 Hz | 0.327 s | Best Effort / Volatile |
+| `/segmentation/obstacle` | `sensor_msgs/msg/PointCloud2` | `camera_init` | 9.07 Hz | 0.327 s | Best Effort / Volatile |
+| `/cmd_vel` | `geometry_msgs/msg/Twist` | — | — | — | 发布者 `controller_server` + `behavior_server`；订阅者 `uart_node` |
+
+TF：动态 `odom→base_link`、`map→odom`、`camera_init→aft_mapped`；静态 `odom→camera_init`（单位）、
+`base_link→base_footprint`、`base_footprint→lidar_link`、`lidar_link→livox_frame`。
+`map→odom` 明显非单位（示例平移 ≈(4.096, 1.630, −0.001) m、yaw ≈130.7°），任务消息在 `map` 下时必须转换。
+详见[现场采集分析](../testing/onsite_field_2026-10-09.md)。
+
 ## 影子接入话题（I1/I2，已实现）
 
 `/sentry_scan` 命名空间是**实车影子入口**（真实 RM 输入、无底盘输出）。

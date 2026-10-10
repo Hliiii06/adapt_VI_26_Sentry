@@ -35,7 +35,7 @@ Mode 2 的航点来自参数文件，是**配置期输入**，按约定必须是
 | 机体参考 frame | `body_frame` | `base_link` | **UNKNOWN**：RM 的 `base_link` 是否等于几何中心/旋转轴。默认不加偏移，等于把 LIO 机体系当作规划参考点 |
 | 参考中心偏移 | `body_center_offset_xyz` | 空 | body 系下 body_frame→参考中心的杆臂；默认不加 |
 | 雷达射线原点 | `sensor_frame` | `lidar_link` | `base_footprint→lidar_link` 静态外参来自 `lidar_to_base` |
-| 速度源 frame | `velocity_frame` / `velocity_frame_alias` | `world` / 空 | `/LIVO2/imu_propagate` 的 header 写 `world`，但 TF 里通常没有该 frame |
+| 速度源 frame | `velocity_frame` / `velocity_frame_alias` | `world` / 空 | `/LIVO2/imu_propagate` 的 header 写 `world`；**现场确认（2026-10-09）TF 不使用 `world` 系**，按不存在处理 → 保持置零降级，不声明别名 |
 
 变换一律在**消息时间戳**上查询：
 
@@ -82,6 +82,21 @@ SCAN 侧关键参数：`cloud_is_world=true`、`need_extrinsic=false`（变换�
 不能再叠一次）、`strict_sensor_pairing=true`、`sensor_pairing_tolerance=0.02`、
 `double_cylinder_offset=0`、`double_cylinder_radius=0.26`、`safety_margin=0`、
 z 膨胀 = `robot_height/2`（默认 0.125）。
+
+## 三点五、里程计与 TF 的时序（2026-10-09 实车发现，已修）
+
+真实 `TfTransformer::odom_callback` **先发** `/Odometry_transformed`、**之后**才广播同 stamp 的
+`odom→base_link`。所以适配器**不按消息时刻查这个动态 TF**：
+
+- 当 `header.frame_id == planning_frame` 时直接用消息位姿（`odom_in_planning_frame`，默认 true），
+  `child_frame_id`（实车为 `base_footprint`）与 `body_frame`（`base_link`）的差异用**静态** TF 修正
+  （`_apply_transform_to_pose`，与发布顺序无关）；
+- 其余动态 TF 查询的容差 `tf_future_tolerance` 按**实测周期**设为 **0.15 s**
+  （`/Odometry_transformed` 9.95 Hz → 周期 0.1005 s；原 0.05 s 会让 `sensor_pose`/云路径持续被拒）；
+  实际使用的偏差记录在 `tf.last_lookup_delay_s`，不是静默放宽。
+
+复现证据：场景 `odom_before_tf`（修复后健康、候选速度 1.00 m/s、无 `needs future data`）与
+`odom_before_tf_legacy`（旧行为 `health_ok=False`、输出全零、日志出现 `needs future data`）。
 
 ## 四、速度语义与降级（必须显式，不得静默）
 

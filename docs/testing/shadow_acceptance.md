@@ -30,7 +30,7 @@ done
 
 最近一次完整记录：`log/shadow/final_matrix.log` 的 14 个场景**全部通过**（2026-10-07 17:02–17:08），`replay_guard` 单独执行通过，合计 **15/15**。
 
-## 二、场景矩阵（合成输入，28 个场景）
+## 二、场景矩阵（合成输入，30 个场景）
 
 | 场景 | 目的（对应交接 B3 测试） | 判据 | 结果 |
 |---|---|---|---|
@@ -39,6 +39,8 @@ done
 | `onsite_tools` | **现场工具彩排**：采集 → 安全自检(idle) → 只发影子目标 → 安全自检(motion) → 录包 | 报告生成并自检通过；idle 全零、motion 有速度；目标只进 `/sentry_scan/task/goal_in`；bag 有消息 | **PASS** |
 | `external_uart_coexist` | **实车原有节点并存（四轮复审 P2）**：外部 `/uart_node` 在跑 | 打印 `external nodes outside /sentry_scan ... ['/uart_node']`，影子节点在 `/sentry_scan` 内被识别 | **PASS** |
 | `onsite_late_inputs` | **采集器后加入（四轮复审 P2）**：采集器先启动，实车发布者 5 s 后才出现 | 观察期内补建订阅（7 话题有数据）；`/tf_static` 用 transient_local 收到 3 条静态变换 | **PASS** |
+| `odom_before_tf` | **实车发布顺序（现场根因，已修）**：先发 `/Odometry_transformed`，同 stamp 的 `odom→base_link` 延后 30 ms | 直通+0.15 容差：`health_ok=True`、候选速度 1.00 m/s、日志无 `needs future data` | **PASS** |
+| `odom_before_tf_legacy` | **同一场景的旧行为**（`odom_in_planning_frame:=false`、容差 0.05） | 精确复现实车症状：`health_ok=False`、输出全零、日志出现 `needs future data (delta ≈0.06s > 0.0500s)` | **PASS** |
 | `input_pause_gate` | **运行中断流/恢复（四轮复审 P2）**：暂停影子输入转发 → 恢复 → 新任务 | 停车延迟 0.392 s（按 `input_paused` 标记）；恢复后 `[8.4, 22.0]` 全零；新任务后恢复运动 | **PASS** |
 | `replay_guard` | 回放安全：非隔离 domain 或缺少 `/clock` 必须拒绝 | launch 拒绝并给出原因 | **PASS** |
 | `no_inputs` | 启动隔离 + 失效关闭 | 必需节点（含 `task_adapter`）在跑；影子命名空间内无禁止话题发布者；无仿真/UART 节点；`health_ok=false`；输出全零 | **PASS** |
@@ -79,7 +81,8 @@ for s in adapter_math guard_logic onsite_tools external_uart_coexist onsite_late
 done
 ```
 
-最近一次完整记录：**28/28 全部通过**（`log/shadow/final7_matrix.log`，2026-10-09 16:57–17:14；`log/` 不入库）。
+最近一次**完整**矩阵记录：**28/28 全部通过**（`log/shadow/final7_matrix.log`，2026-10-09 16:57–17:14），对应**修复前**的代码（ADR 041/042 之前）。
+修复后（`odom_before_tf` 等）的矩阵 `final8` 跑到 **11/30** 时因现场机器断电中断，11 个全部通过；随后补跑 `mode1_goal`、`task_frame_transform` 也通过 → 修复后已确认 **13/30**，其余 17 个（`mode2_waypoints`、`mode3_path`、`padded_cloud`、`nav2_coexist`、`cloud_stop`、`invalid_cloud`、`map_*`、各类 `*_stop`/时间戳/跳变、`cancel`）**待重跑**，不得当作已通过。
 
 ## 二点五、审查修正（对照 54a1b1d–c1a2440）
 
@@ -151,6 +154,17 @@ done
 **实车当前状态（用户回传，2026-10-09 19:20）**：`health_ok=False`、影子输出全零、
 影子命名空间未出现在控制话题发布者名单、`/cmd_vel` 上未发现发布者（原系统的速度来源待现场确认）。
 原因待 `onsite_diagnose.sh` 输出确认，**尚未开始在线对齐检查**。
+
+## 二点十、实车驱动的修复（2026-10-09，对照现场采集）
+
+| 项目 | 内容 | 证据 |
+|---|---|---|
+| 现场现象 | 影子节点在跑、控制话题上没有影子发布者，但 `health_ok=False`、输出恒零 | 用户 19:20 回传的 `onsite_check_safety.sh motion` 输出 |
+| 根因 | RM `TfTransformer::odom_callback` 先 `publish(/Odometry_transformed)`、后 `sendTransform(odom→base_link)`（同 stamp）；适配器按消息时刻查该动态 TF 只能拿到上一周期样本（≈0.1 s）> 当时容差 0.05 s | `VI_26_Sentry/src/hnurm_bringup/src/tf_transformer_node.cpp:255-305`（只读）；`hz_Odometry_transformed.txt`（9.95 Hz，间隔 0.095–0.105 s） |
+| 修复 1 | `odom_in_planning_frame`（默认 true）：消息已在规划系时直接用其位姿；`child_frame_id`→`body_frame` 的差异用**静态** TF 修正 | `rm_input_adapter.py:on_odom()` / `_body_pose_from_odom()` / `_apply_transform_to_pose()`；单测 `test_pose_offset_composition_matches_static_tf` |
+| 修复 2 | `tf_future_tolerance` 0.05 → **0.15 s**（按实测周期 0.1005 s + 余量），实际偏差记录在 `tf.last_lookup_delay_s` | `config/shadow_contract.yaml`、launch 默认值 |
+| 复现 | `odom_before_tf`（修复后 PASS）与 `odom_before_tf_legacy`（旧行为 `health_ok=False`、零输出） | `log/shadow/final8_*.log` |
+| 未改 RM | 只改本仓库适配层与默认参数；`../VI_26_Sentry` 仍只读、SHA 未变 | 见每轮提交说明 |
 
 ## 三、本轮新增的 SCAN 改动与回归
 
