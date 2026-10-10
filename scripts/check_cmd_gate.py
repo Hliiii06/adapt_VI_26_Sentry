@@ -30,6 +30,8 @@ STATE_TOPIC = "/sentry_scan/cmd_gate/state"
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--duration", type=float, default=6.0)
+    parser.add_argument("--topic", default=GATED_TOPIC,
+                        help="闸门输出话题（接管时闸门输出是 /cmd_vel，必须显式指定）")
     parser.add_argument("--expect-silent", action="store_true")
     parser.add_argument("--expect-active", action="store_true")
     parser.add_argument("--expect-zero-output", action="store_true",
@@ -45,7 +47,7 @@ def main(argv=None):
     latch = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
                        reliability=ReliabilityPolicy.RELIABLE,
                        durability=DurabilityPolicy.TRANSIENT_LOCAL)
-    node.create_subscription(Twist, GATED_TOPIC, lambda m: samples.append(m), 10)
+    node.create_subscription(Twist, args.topic, lambda m: samples.append(m), 10)
     node.create_subscription(String, STATE_TOPIC, lambda m: states.append(m.data), latch)
     end = time.time() + args.duration
     while time.time() < end and rclpy.ok():
@@ -58,8 +60,9 @@ def main(argv=None):
     max_wz = max((abs(m.angular.z) for m in samples), default=0.0)
     max_xyz = max((abs(m.linear.z) for m in samples), default=0.0)
     failures = []
-    print("gated samples=%d  max|vx|=%.3f max|vy|=%.3f max|wz|=%.3f max|vz|=%.3f  states=%s"
-          % (len(samples), max_vx, max_vy, max_wz, max_xyz, sorted(set(states)) or "-"))
+    print("topic=%s  samples=%d  max|vx|=%.3f max|vy|=%.3f max|wz|=%.3f max|vz|=%.3f  states=%s"
+          % (args.topic, len(samples), max_vx, max_vy, max_wz, max_xyz,
+             sorted(set(states)) or "-"))
     if args.expect_silent and samples:
         failures.append("expected NO output before enable, got %d messages" % len(samples))
     if args.expect_active:
