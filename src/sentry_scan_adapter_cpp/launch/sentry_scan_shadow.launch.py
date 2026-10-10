@@ -210,7 +210,7 @@ def _setup(context):
                 # 影子阶段不透传 yaw 候选：MCU 保留朝向所有权。
                 "yaw_candidate_enabled": False,
             })],
-            remappings=[("cmd_vel", "cmd_vel_candidate")],
+            remappings=[("cmd_vel", value("controller_cmdvel_topic"))],
         ),
         Node(
             package="sentry_scan_adapter_cpp", executable="shadow_guard", name="shadow_guard",
@@ -320,6 +320,10 @@ def generate_launch_description():
         DeclareLaunchArgument("start_rviz", default_value="false"),
         DeclareLaunchArgument("cmd_gate", default_value="false",
                               description="true = 启动命令闸门（默认禁止输出，需显式使能）"),
+        DeclareLaunchArgument("controller_cmdvel_topic", default_value="cmd_vel_candidate",
+                              description="跟踪器速度输出去向：默认 cmd_vel_candidate（经命令闸门）；"
+                                          "设为 /cmd_vel 则**绕过闸门直连底盘**，"
+                                          "仅在轮子离地的台架测试中使用，落地必须改回默认"),
         DeclareLaunchArgument("gate_output_topic", default_value="cmd_vel_gated",
                               description="闸门输出话题；默认不是 /cmd_vel，误启动不会驱动底盘"),
         DeclareLaunchArgument("gate_max_vx", default_value="0.0"),
