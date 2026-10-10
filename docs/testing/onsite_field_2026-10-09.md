@@ -168,12 +168,14 @@ map → odom → base_link → base_footprint → lidar_link → livox_frame
 | SCAN 在 `odom` 系规划 | `planning_frame=odom`（本仓库默认）**CONFIRMED** |
 | IMU 取自 mid360（与雷达同体），雷达基本可当作机体中心 | `imu_to_body_offset_xyz` 视为零、`require_center_velocity=false`；`body_center_offset_xyz` 暂为空 |
 | 允许第 7 项（`hnurm_uart` 的 `twist_topic` 指向闸门输出） | 接管阶段可用 launch 参数切换，**不需要改 RM 源码**；本轮不实施 |
+| 碰撞包络：**半径 0.26 m、高 0.15 m 的圆柱** | `robot_radius=0.26`、`robot_height=0.15`、`body_height=0.075`、`safety_margin=0`；`run_shadow_onsite.sh` 默认已按此设置。真实尺寸，不得为通过而缩小 |
+| 现场**存在可立即停车的急停** | 接管前门槛之一满足；MCU 速度超时归零**时限仍 UNKNOWN**，接管前必须确认 |
 
 ## E. 仍然 UNKNOWN（阻塞静止对齐检查的通过判定）
 
 - 车辆**几何中心/旋转轴**与 `base_link` 的真实关系、真实离地高度（TF 定义 `base_link→lidar_link` 为零**不等于**物理标定）；
-- 碰撞包络实测尺寸（长×宽、最高点、最低点）→ `robot_height` / `robot_radius` / `safety_margin`；
-- 急停触发方式与 MCU 速度超时归零时间；
+- （已确认，见 §D）碰撞包络 = 半径 0.26 m、高 0.15 m 的圆柱；
+- MCU/固件"速度命令停发后多久归零"的**时限**（急停本身已确认存在且可立即停车）；
 - 修复后现场 `health_ok` 是否转为 true、地图心跳是否持续（需要带着本修复重跑影子入口）。
 
 ## F. 下一步（现场，仍只读）

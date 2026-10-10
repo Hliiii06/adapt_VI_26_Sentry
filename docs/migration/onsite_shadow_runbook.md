@@ -87,6 +87,8 @@ python3 scripts/check_onsite_report.py --report log/onsite/<时间戳>/report.js
 | 点云/雷达/机体/规划系的 TF | 报告 TF 两节 + `tf2_echo` | 存在 `odom→base_link`、`base_link→base_footprint`、`base_footprint→lidar_link`（或等效链）；云 frame 能连到规划系 |
 | odom 参考点、朝向含义、速度所在坐标系 | `tf2_echo odom base_link`、`/LIVO2/imu_propagate` 的 `twist` | 参考点是雷达/机体？朝向是否等于机体 yaw？速度是 world 系还是 body 系？**不能只按源码假设** |
 | 真实底盘控制话题与当前发布者 | `/cmd_vel*` 的发布者名单 | 记录"谁在控制底盘"，影子接入时该名单不得多出 `/sentry_scan/*` |
+| ~~碰撞包络实测尺寸~~ | — | **已确认（2026-10-09）**：半径 0.26 m、高 0.15 m 的圆柱；`run_shadow_onsite.sh` 默认已按此设置 |
+| ~~急停方式~~ | — | **已确认**：存在可立即停车的急停；**MCU 速度超时归零时限仍 UNKNOWN** |
 | `world` frame 与规划系的关系 | TF 列表 + `tf2_echo odom world`（若存在） | 若 `world` 不在 TF 里，保持适配器默认降级（速度置零），**不要**凭 header 名声明等价 |
 
 把确认结果填到本文 §8 的表格，并同步到[影子输入契约](../interfaces/shadow_input_contract.md)
@@ -112,6 +114,10 @@ ros2 topic info -v /cmd_vel          # 原有速度源（Nav2 controller/behavio
 bash scripts/run_shadow_onsite.sh preflight_only   # 只做检查：话题存在？影子没在跑？谁在控底盘？
 bash scripts/run_shadow_onsite.sh start_rviz:=true # 正式启动（前台；Ctrl-C 退出）
 ```
+
+现场入口自带实车包络默认值（半径 **0.26 m**、高 **0.15 m**，用户 2026-10-09 确认，`safety_margin=0`）。
+**不要**直接 `ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py`：launch 自身默认是通用值
+`robot_height=0.25`（仿真/回归用）。
 
 > `start_rviz` 默认是 **false**：要按第 3 节在 RViz 里对齐，必须显式加 `start_rviz:=true`。
 

@@ -81,7 +81,20 @@ cloud       = T_planning<-cloud.header.frame_id(cloud_stamp) · cloud
 SCAN 侧关键参数：`cloud_is_world=true`、`need_extrinsic=false`（变换与真实外参已在 adapter/TF 完成，
 不能再叠一次）、`strict_sensor_pairing=true`、`sensor_pairing_tolerance=0.02`、
 `double_cylinder_offset=0`、`double_cylinder_radius=0.26`、`safety_margin=0`、
-z 膨胀 = `robot_height/2`（默认 0.125）。
+z 膨胀 = `robot_height/2`。
+
+**碰撞包络（CONFIRMED，用户 2026-10-09 确认）**：把车当作**半径 0.26 m、高 0.15 m 的圆柱**
+→ `robot_radius=0.26`、`robot_height=0.15`、`body_height=robot_height/2=0.075`、
+`inflation_z_up=inflation_z_down=0.075`、`safety_margin=0`（用户未给额外余量）。
+这是**真实尺寸**（不是为通过检查而缩小）；`run_shadow_onsite.sh` 的默认值即此。
+**注意**：`sentry_scan_shadow.launch.py` 自身的默认仍是通用值 `robot_height=0.25`
+（仿真/回归用），实车必须走 `run_shadow_onsite.sh` 或显式传 `robot_height:=0.15 robot_radius:=0.26`。
+注意与 `PointCloudNode` 自身参数（`robot_radius=0.25`、`sensor_height=0.31`、高度范围
+`[-0.35, 1.0]`）**不是同一件事**：那是它那条地面分割/裁切链路的参数，不构成 SCAN 的碰撞包络。
+早期通用默认 0.25 是仿真值，实车纠偏为 0.15。
+
+**急停（CONFIRMED，用户 2026-10-09）**：现场存在急停方式，可**立即**停止车辆。
+MCU/固件侧的"速度命令超时自动归零"时限**仍 UNKNOWN**，接管前必须确认。
 
 ## 三点五、里程计与 TF 的时序（2026-10-09 实车发现，已修）
 

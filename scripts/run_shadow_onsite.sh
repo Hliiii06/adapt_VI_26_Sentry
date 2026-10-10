@@ -18,6 +18,7 @@
 #   CLOUD_TOPIC    默认 /cloud_registered
 #   PLANNING_FRAME 默认 odom
 #   ROBOT_HEIGHT / ROBOT_RADIUS / SAFETY_MARGIN 见 docs/interfaces/shadow_input_contract.md
+#   2026-10-09 用户确认的实车包络：半径 0.26 m、高 0.15 m 的圆柱（下方默认值即此）
 #   SHADOW_LOG_DIR 默认 log/shadow
 
 set -uo pipefail
@@ -29,7 +30,9 @@ ODOM_TOPIC="${ODOM_TOPIC:-/Odometry_transformed}"
 VELOCITY_TOPIC="${VELOCITY_TOPIC:-/LIVO2/imu_propagate}"
 CLOUD_TOPIC="${CLOUD_TOPIC:-/cloud_registered}"
 PLANNING_FRAME="${PLANNING_FRAME:-odom}"
-ROBOT_HEIGHT="${ROBOT_HEIGHT:-0.25}"
+# 已确认的实车包络（2026-10-09，用户实测/确认）：半径 0.26 m、高 0.15 m 的圆柱。
+# 这是**真实尺寸**，不是为通过检查而缩小；safety_margin 仍为 0（用户未给额外余量）。
+ROBOT_HEIGHT="${ROBOT_HEIGHT:-0.15}"
 ROBOT_RADIUS="${ROBOT_RADIUS:-0.26}"
 SAFETY_MARGIN="${SAFETY_MARGIN:-0.0}"
 SHADOW_LOG_DIR="${SHADOW_LOG_DIR:-log/shadow}"
