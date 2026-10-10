@@ -2,8 +2,8 @@
 
 状态：**v1 已实现并在合成输入下通过契约测试**；标 **UNKNOWN** 的项必须由 I1 用现车/录包核对后
 才能作为实车依据。本页是 `/sentry_scan/*` 接口的唯一事实入口；实现见
-`src/sentry_scan_adapter/`，入口见 [影子 launch](../../src/sentry_scan_adapter/launch/sentry_scan_shadow.launch.py)，
-参数模板见 [shadow_contract.yaml](../../src/sentry_scan_adapter/config/shadow_contract.yaml)。
+`src/sentry_scan_adapter/`，入口见 [影子 launch](../../src/sentry_scan_adapter_cpp/launch/sentry_scan_shadow.launch.py)，
+参数模板见 [shadow_contract.yaml](../../src/sentry_scan_adapter_cpp/config/shadow_contract.yaml)。
 
 **本页不授权任何底盘输出**：影子入口没有"下发真实命令"的开关，不启动 UART/Nav2/LIO/registration/
 机器人/运动模拟器。I3 驱车另行授权（见[交接 B](../migration/real_robot_handoff.md)）。
