@@ -66,6 +66,22 @@ SCAN 跟踪器 ──/sentry_scan/cmd_vel_candidate──> 命令闸门 ──> 
    原地小幅验证一次（用户操作）；
 4. 记录：切换前后发布者名单、时间、执行人。
 
+## 三点四、影子阶段签收（2026-10-10 现场实测，已通过）
+
+| 判据 | 现场实测 | 结论 |
+|---|---|---|
+| 输入健康 | `health_ok=True`；各通道 `rejected=0`；`age_s` 0.008–0.09 s；`tf.frame=odom<-lidar_link` | 时间戳同尺度、TF 可用 |
+| 标准入口 | RViz 2D Goal Pose（`/sentry_scan/task/goal_in`）→ FSM `final_plan_success=1`，trajectory 54–57 连续下发 | 目标→规划→跟踪贯通 |
+| 候选速度 | `onsite_check_safety.sh motion`：`shadow samples=121, max|v_xy|=1.0000` | 候选速度确实流出 |
+| 未定义分量 | `max|wz|=0`、`max|vz|=0` | 旋转/未定义轴不透传（`zero_yaw_candidate=true`） |
+| 图隔离 | `/cmd_vel*` 上无影子发布者；外部仅 `/uart_node` 被单独列出 | 影子未接真实控制入口 |
+| 地图心跳 | 门控 `gate=pass`、`map_age` 0.015–0.07、`graph_violation` 空 | 地图在更新、未触发锁止 |
+| 几何对齐 | 用户现场确认：**碰撞包络没有问题** | 包络/机体与点云对齐（人工目视） |
+| 底盘入口 | 用户确认：**`/cmd_vel`**（`ros2 topic list` 可见），原栈为 `controller_server` + `behavior_server`，Nav2 现已停用 | 接管时无需再停 Nav2，直接由闸门供应 |
+
+仍未验证（不得据此宣称已通过）：实车**实际完成路线**、速度方向语义（`world` 未解析，前馈为零）、
+MCU 停车时限。
+
 ## 三点五、影子成功后的最短平地低速步骤（待批准，未执行）
 
 前置：静止影子验证 A–F 全部通过（health True、云/包络/机体对齐、标准入口产生路径与候选速度、
