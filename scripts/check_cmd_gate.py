@@ -32,6 +32,8 @@ def main(argv=None):
     parser.add_argument("--duration", type=float, default=6.0)
     parser.add_argument("--expect-silent", action="store_true")
     parser.add_argument("--expect-active", action="store_true")
+    parser.add_argument("--expect-zero-output", action="store_true",
+                        help="已使能但限幅为 0：应有消息且**全部为零**")
     parser.add_argument("--max", type=float, default=0.3)
     parser.add_argument("--max-wz", type=float, default=0.0)
     args, ros_args = parser.parse_known_args(argv)
@@ -65,6 +67,13 @@ def main(argv=None):
             failures.append("expected active output, got none (仍被互锁挡住？看状态话题)")
         elif max(max_vx, max_vy) <= 1e-9:
             failures.append("active window had no non-zero velocity")
+    if args.expect_zero_output:
+        if not samples:
+            failures.append("expected zero-valued output after enable, got NO messages "
+                            "(gate 未使能或未在发布)")
+        elif max(max_vx, max_vy, max_wz, max_xyz) > 1e-9:
+            failures.append("expected all-zero output, got max|vx|=%.3f max|vy|=%.3f max|wz|=%.3f"
+                            % (max_vx, max_vy, max_wz))
     if max_vx > args.max + 1e-6 or max_vy > args.max + 1e-6:
         failures.append("clamp violated: max|vx|=%.3f max|vy|=%.3f > %.3f"
                         % (max_vx, max_vy, args.max))
