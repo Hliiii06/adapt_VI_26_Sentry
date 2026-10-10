@@ -30,7 +30,7 @@ done
 
 最近一次完整记录：`log/shadow/final_matrix.log` 的 14 个场景**全部通过**（2026-10-07 17:02–17:08），`replay_guard` 单独执行通过，合计 **15/15**。
 
-## 二、场景矩阵（合成输入，30 个场景）
+## 二、场景矩阵（合成输入，32 个场景）
 
 | 场景 | 目的（对应交接 B3 测试） | 判据 | 结果 |
 |---|---|---|---|
@@ -39,6 +39,8 @@ done
 | `onsite_tools` | **现场工具彩排**：采集 → 安全自检(idle) → 只发影子目标 → 安全自检(motion) → 录包 | 报告生成并自检通过；idle 全零、motion 有速度；目标只进 `/sentry_scan/task/goal_in`；bag 有消息 | **PASS** |
 | `external_uart_coexist` | **实车原有节点并存（四轮复审 P2）**：外部 `/uart_node` 在跑 | 打印 `external nodes outside /sentry_scan ... ['/uart_node']`，影子节点在 `/sentry_scan` 内被识别 | **PASS** |
 | `onsite_late_inputs` | **采集器后加入（四轮复审 P2）**：采集器先启动，实车发布者 5 s 后才出现 | 观察期内补建订阅（7 话题有数据）；`/tf_static` 用 transient_local 收到 3 条静态变换 | **PASS** |
+| `livox_cloud` | **现场真实点云布局（2026-10-10）**：PCL 风格 48 字节多字段（字段间有空洞） | 健康 + 候选速度 1.00 m/s；日志无 `cloud rejected`（旧实现会对这种 dtype 报错） | **PASS** |
+| `rviz_config` | **RViz 配置随包安装（2026-10-10）** | 安装空间存在 `.rviz`、19 个显示项、含真实点云显示、SetGoal 指向 `/sentry_scan/task/goal_in` | **PASS** |
 | `odom_before_tf` | **实车发布顺序（现场根因，已修）**：先发 `/Odometry_transformed`，同 stamp 的 `odom→base_link` 延后 30 ms | 直通+0.15 容差：`health_ok=True`、候选速度 1.00 m/s、日志无 `needs future data` | **PASS** |
 | `odom_before_tf_legacy` | **同一场景的旧行为**（`odom_in_planning_frame:=false`、容差 0.05） | 精确复现实车症状：`health_ok=False`、输出全零、日志出现 `needs future data (delta ≈0.06s > 0.0500s)` | **PASS** |
 | `input_pause_gate` | **运行中断流/恢复（四轮复审 P2）**：暂停影子输入转发 → 恢复 → 新任务 | 停车延迟 0.392 s（按 `input_paused` 标记）；恢复后 `[8.4, 22.0]` 全零；新任务后恢复运动 | **PASS** |
@@ -165,6 +167,16 @@ done
 | 修复 2 | `tf_future_tolerance` 0.05 → **0.15 s**（按实测周期 0.1005 s + 余量），实际偏差记录在 `tf.last_lookup_delay_s` | `config/shadow_contract.yaml`、launch 默认值 |
 | 复现 | `odom_before_tf`（修复后 PASS）与 `odom_before_tf_legacy`（旧行为 `health_ok=False`、零输出） | `log/shadow/final8_*.log` |
 | 未改 RM | 只改本仓库适配层与默认参数；`../VI_26_Sentry` 仍只读、SHA 未变 | 见每轮提交说明 |
+
+## 二点十一、第二次现场故障修复（2026-10-10）
+
+| 项目 | 内容 | 证据 |
+|---|---|---|
+| 现象 | RViz 空白；适配器持续 `cloud rejected: ... PointFields and structured NumPy array dtype do not match` | 用户现场日志（`~/下载/log 20261010_110132` 对应时段） |
+| 根因 1 | `/cloud_registered` 为 PCL 风格 48 字节布局（`x@0 y@4 z@8 normal_*@16..24 intensity@32 curvature@36`），`do_transform_cloud()` 要求结构化 dtype 与 PointFields 完全一致 | 现场 `cloud_stats.txt`（`point_step=48`，fields 列表） |
+| 修复 1 | `_parse_xyz`（按字段偏移，容忍空洞/行填充）+ `_transform_points`（numpy 刚体变换）+ `_xyz_cloud`（输出 `point_step=12` 的 xyz 密集云）；不再用 `do_transform_cloud` | 单测 `test_real_livox_layout_fields_with_gaps` 等；场景 `livox_cloud` |
+| 根因 2 | `setup.py` 未安装 `*.rviz`，launch 用 share 路径打开 → `rviz2 -d <不存在>` 静默空界面 | `install/sentry_scan_adapter/share/sentry_scan_adapter/launch/` 缺文件 |
+| 修复 2 | `setup.py` 安装 `launch/*.rviz`；launch 缺失时 `[WARN]`；`run_shadow_onsite.sh` 预检直接报错 | 场景 `rviz_config`（19 显示项、真实云显示、SetGoal 指向影子入口） |
 
 ## 三、本轮新增的 SCAN 改动与回归
 

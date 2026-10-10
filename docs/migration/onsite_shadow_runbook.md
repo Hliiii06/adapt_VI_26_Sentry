@@ -207,6 +207,35 @@ bash scripts/onsite_diagnose.sh
 
 若仍为 false，把 `原因:` 行、`odom.rejected`、`tf.last_lookup_delay_s`、`cloud.rejected` 一起回传。
 
+## 4.7 2026-10-10 现场第二个故障：RViz 打开是空白 + 云被拒
+
+**现象**：`start_rviz:=true` 后 RViz 界面里什么都没有；适配器日志持续
+`cloud rejected: cloud transform failed: PointFields and structured NumPy array dtype
+do not match for all fields!`。
+
+**原因 1（云）**：现场 `/cloud_registered` 是 **PCL 风格 48 字节布局**
+（`x@0 y@4 z@8 normal_x@16 normal_y@20 normal_z@24 intensity@32 curvature@36`，字段间有空洞）。
+`tf2_sensor_msgs.do_transform_cloud()` 要求 numpy 结构化 dtype 与 PointFields 完全一致，
+遇到这种布局直接抛异常 → 每帧被拒 → 云通道不健康、SCAN 无输出。
+**已改**：适配层自己做刚体变换（`_transform_points`）并输出**只含 xyz 的密集云**
+（`_xyz_cloud`，`point_step=12`），不再调用 `do_transform_cloud`；任意布局（多字段、
+行填充、字段空洞）都能处理，输出布局统一。
+
+**原因 2（RViz 空白）**：`setup.py` 的 `data_files` 只安装了 `*.launch.py` 与 `*.yaml`，
+**`.rviz` 没被安装**，而 launch 用 `share/.../launch/sentry_scan_shadow.rviz` 打开 RViz →
+`rviz2 -d <不存在的文件>` **静默**打开空显示列表。
+**已改**：`setup.py` 安装 `launch/*.rviz`；launch 在配置缺失时打印 `[WARN]`；
+`run_shadow_onsite.sh` 预检会检查该文件并直接报错；新增 `rviz_config` 回归场景。
+
+现场排查命令：
+
+```bash
+ros2 pkg prefix sentry_scan_adapter   # 再拼 /share/sentry_scan_adapter/launch/sentry_scan_shadow.rviz
+ls -l "$(ros2 pkg prefix sentry_scan_adapter)/share/sentry_scan_adapter/launch/" | grep rviz
+ros2 topic hz /sentry_scan/cloud      # 空 = 云仍被拒（看适配器日志里的 cloud rejected 原因）
+```
+若 RViz 仍空白：把 Displays 面板里 `Fixed Frame` 的状态（是否有红字）截图回传。
+
 ## 5. 检查 SCAN 没有发布真实控制命令
 
 ```bash

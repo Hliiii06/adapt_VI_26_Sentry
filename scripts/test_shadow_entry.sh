@@ -4,6 +4,7 @@
 # 用法：
 #   bash scripts/test_shadow_entry.sh adapter_math        # 适配层数学/点云布局单测（不需要 ROS 图）
 #   bash scripts/test_shadow_entry.sh guard_logic         # 影子门控逻辑单测（不需要 ROS 图）
+#   bash scripts/test_shadow_entry.sh rviz_config         # RViz 配置是否随包安装（现场空白问题回归）
 #   bash scripts/test_shadow_entry.sh no_inputs           # 无输入：不健康且影子输出为零
 #   bash scripts/test_shadow_entry.sh healthy_static      # 合成输入、无任务：健康但无运动
 #   bash scripts/test_shadow_entry.sh mode1_goal          # Mode 1 目标：候选速度流过门控
@@ -15,6 +16,11 @@
 #   bash scripts/test_shadow_entry.sh external_uart_coexist # 实车 /uart_node 在跑时自检不误判
 #   bash scripts/test_shadow_entry.sh onsite_late_inputs    # 采集器后加入：补建订阅 + 收到静态 TF
 #   bash scripts/test_shadow_entry.sh input_pause_gate     # 暂停/恢复影子输入：停住且恢复不续跑
+#   bash scripts/test_shadow_entry.sh cpp_mode1_goal        # C++ 运行适配层：目标 -> 候选速度
+#   bash scripts/test_shadow_entry.sh cpp_livox_cloud       # C++ 适配层 + 现场 48 字节 PCL 布局
+#   bash scripts/test_shadow_entry.sh cpp_odom_before_tf    # C++ 适配层 + 实车 odom/TF 发布顺序
+#   bash scripts/test_shadow_entry.sh cmd_gate              # 命令闸门：默认静默 -> 使能 -> 限幅输出
+#   bash scripts/test_shadow_entry.sh livox_cloud           # 现场真实 48 字节 PCL 布局点云
 #   bash scripts/test_shadow_entry.sh odom_before_tf       # 实车发布顺序：直通修复后健康+有速度
 #   bash scripts/test_shadow_entry.sh odom_before_tf_legacy # 关掉直通 -> 复现实车 health_ok=False
 #   bash scripts/test_shadow_entry.sh cloud_stop          # 云中断
@@ -62,15 +68,52 @@ if [[ "${SCENARIO}" == "guard_logic" ]]; then
   python3 scripts/test_shadow_guard_logic.py
   exit $?
 fi
+if [[ "${SCENARIO}" == "rviz_config" ]]; then
+  # 回归：RViz 配置必须随包安装（漏装会让现场 RViz 静默显示空白）
+  python3 - <<'PYEOF'
+import os
+import subprocess
+import sys
+import yaml
+
+prefix = subprocess.run(["ros2", "pkg", "prefix", "sentry_scan_adapter_cpp"],
+                        capture_output=True, text=True).stdout.strip()
+path = os.path.join(prefix, "share", "sentry_scan_adapter_cpp", "launch",
+                    "sentry_scan_shadow.rviz")
+if not os.path.isfile(path):
+    print("FAIL: 安装空间缺少 RViz 配置: %s" % path)
+    sys.exit(2)
+with open(path) as handle:
+    config = yaml.safe_load(handle)
+manager = config["Visualization Manager"]
+displays = manager["Displays"]
+names = [d.get("Name") for d in displays]
+tools = manager.get("Tools", [])
+goal = [t for t in tools if t.get("Class", "").endswith("SetGoal")]
+print("rviz 配置: %s" % path)
+print("  displays=%d fixed_frame=%s" % (len(displays), manager["Global Options"]["Fixed Frame"]))
+print("  真实点云显示: %s" % any(n and "cloud_registered" in n for n in names))
+print("  SetGoal 话题: %s" % (goal[0]["Topic"]["Value"] if goal else "缺失"))
+if not any(n and "cloud_registered" in n for n in names):
+    print("FAIL: 配置里没有真实点云显示")
+    sys.exit(2)
+if not any(t.get("Topic", {}).get("Value", "").startswith("/sentry_scan/")
+           for t in goal):
+    print("FAIL: SetGoal 未指向影子任务入口")
+    sys.exit(2)
+print("PASS: RViz 配置已安装且包含真实云显示与影子目标工具")
+PYEOF
+  exit $?
+fi
 
 # 回放安全门：不满足隔离/时钟条件时 launch 必须拒绝启动。
 if [[ "${SCENARIO}" == "replay_guard" ]]; then
   FAIL=0
-  out1="$(ROS_DOMAIN_ID=0 timeout 40 ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py \
+  out1="$(ROS_DOMAIN_ID=0 timeout 40 ros2 launch sentry_scan_adapter_cpp sentry_scan_shadow.launch.py \
     replay:=true use_sim_time:=true start_rviz:=false 2>&1 | head -20)"
   grep -q "isolated ROS_DOMAIN_ID" <<<"${out1}" || {
     echo "FAIL: replay:=true 在非隔离 domain 下没有被拒绝" >&2; FAIL=2; }
-  out2="$(timeout 40 ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py \
+  out2="$(timeout 40 ros2 launch sentry_scan_adapter_cpp sentry_scan_shadow.launch.py \
     use_sim_time:=true start_rviz:=false 2>&1 | head -20)"
   grep -q "only allowed with replay" <<<"${out2}" || {
     echo "FAIL: use_sim_time:=true 在非 replay 下没有被拒绝" >&2; FAIL=2; }
@@ -84,7 +127,7 @@ STAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="${REPO_ROOT}/log/shadow/${SCENARIO}.${STAMP}"
 mkdir -p "${LOG_DIR}"
 
-SHARE="${REPO_ROOT}/install/sentry_scan_adapter/share/sentry_scan_adapter/config"
+SHARE="${REPO_ROOT}/install/sentry_scan_adapter_cpp/share/sentry_scan_adapter_cpp/config"
 LAUNCH_ARGS=()
 case "${SCENARIO}" in
   mode2_waypoints) LAUNCH_ARGS=(navi_mode:=2 "keypoints_file:=${SHARE}/shadow_test_waypoints.yaml") ;;
@@ -92,6 +135,8 @@ case "${SCENARIO}" in
   map_gate|map_relatch|map_relatch_newtask)
                    LAUNCH_ARGS=(map_update_topic:=test/map_heartbeat) ;;
   input_pause_gate) LAUNCH_ARGS=(input_gate:=true) ;;
+  cpp_*)           LAUNCH_ARGS=(adapter_impl:=cpp) ;;
+  cmd_gate)        LAUNCH_ARGS=(cmd_gate:=true gate_max_vx:=0.3 gate_max_vy:=0.3) ;;
   odom_before_tf_legacy) LAUNCH_ARGS=(odom_in_planning_frame:=false tf_future_tolerance:=0.05) ;;
 esac
 
@@ -108,7 +153,7 @@ trap cleanup EXIT
 
 echo "== scenario=${SCENARIO} domain=${DOMAIN} log=${LOG_DIR}"
 
-setsid ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py \
+setsid ros2 launch sentry_scan_adapter_cpp sentry_scan_shadow.launch.py \
   start_rviz:=false "${LAUNCH_ARGS[@]}" > "${LOG_DIR}/launch.log" 2>&1 &
 LAUNCH_PGID=$!
 sleep "${STARTUP_WAIT}"
@@ -138,7 +183,7 @@ case "${SCENARIO}" in
     run_fake --duration 40
     sleep 6
     python3 scripts/check_shadow_graph.py --duration 6 --expect-healthy --expect-zero || RC=$?
-    ros2 run sentry_scan_adapter check_inputs --duration 6 --planning-frame odom || RC=$?
+    ros2 run sentry_scan_adapter_cpp check_inputs --duration 6 --planning-frame odom || RC=$?
     ;;
   mode1_goal)
     run_fake --duration 60 --send-goal
@@ -166,8 +211,58 @@ case "${SCENARIO}" in
     run_fake --duration 60 --send-goal --padded-cloud
     sleep 6
     python3 scripts/check_shadow_graph.py --duration 10 --expect-healthy --expect-motion || RC=$?
-    if [[ "${RC}" -eq 0 ]] && ! grep -q "repacked to a dense layout" "${LOG_DIR}/launch.log"; then
-      echo "FAIL: 带行填充的点云没有被适配层重排为密集布局" >&2
+    # 现在由 _parse_xyz 按行首址直接解析（不再"重排为密集布局"），因此判据是：
+    # 云被接受（健康+运动）且日志里没有 cloud rejected。
+    if [[ "${RC}" -eq 0 ]] && grep -q "cloud rejected" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 带行填充的点云被拒" >&2
+      grep -m3 "cloud rejected" "${LOG_DIR}/launch.log" >&2
+      RC=2
+    fi
+    ;;
+  cpp_mode1_goal)
+    # C++ 运行适配层：Mode 1 目标下健康 + 候选速度（与 py 版同一套判据）
+    run_fake --duration 60 --send-goal
+    sleep 4
+    python3 scripts/check_shadow_graph.py --duration 12 --expect-healthy --expect-motion || RC=$?
+    ;;
+  cpp_livox_cloud)
+    # C++ 适配层 + 现场真实 48 字节 PCL 布局点云（PCL 原生解析）
+    run_fake --duration 60 --send-goal --livox-cloud
+    sleep 4
+    python3 scripts/check_shadow_graph.py --duration 12 --expect-healthy --expect-motion || RC=$?
+    if [[ "${RC}" -eq 0 ]] && grep -q "cloud rejected" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: C++ 适配层仍拒绝了真实布局点云" >&2
+      RC=2
+    fi
+    ;;
+  cpp_odom_before_tf)
+    # C++ 适配层 + 实车发布顺序（先 odom 后同 stamp TF）
+    run_fake --duration 60 --send-goal --tf-after-odom --tf-delay-after-odom 0.03
+    sleep 4
+    python3 scripts/check_shadow_graph.py --duration 12 --expect-healthy --expect-motion || RC=$?
+    ;;
+  cmd_gate)
+    # 命令闸门：默认静默 -> 使能 + 任务授权后才有输出，且限幅 0.3
+    run_fake --duration 90 --send-goal
+    sleep 4
+    echo "-- 未使能：必须一条消息都没有"
+    python3 scripts/check_cmd_gate.py --duration 6 --expect-silent || RC=$?
+    python3 scripts/cmd_gate_control.py --enable || RC=$?
+    sleep 2
+    echo "-- 已使能 + 有任务：应按 0.3 限幅输出"
+    python3 scripts/check_cmd_gate.py --duration 8 --expect-active --max 0.3 || RC=$?
+    python3 scripts/cmd_gate_control.py --disable || RC=$?
+    ;;
+  livox_cloud)
+    # 现场真实 /cloud_registered 布局（PCL 风格 48 字节、字段间有空洞）：必须能变换并进入 SCAN。
+    # 旧实现走 do_transform_cloud 会对这种 dtype 报
+    # "PointFields and structured NumPy array dtype do not match" 并整帧被拒。
+    run_fake --duration 60 --send-goal --livox-cloud
+    sleep 4
+    python3 scripts/check_shadow_graph.py --duration 12 --expect-healthy --expect-motion || RC=$?
+    if [[ "${RC}" -eq 0 ]] && grep -q "cloud rejected" "${LOG_DIR}/launch.log"; then
+      echo "FAIL: 真实布局的云仍被拒" >&2
+      grep -m3 "cloud rejected" "${LOG_DIR}/launch.log" >&2
       RC=2
     fi
     ;;

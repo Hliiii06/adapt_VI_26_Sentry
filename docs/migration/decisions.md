@@ -45,6 +45,8 @@ PROPOSED = 实施细节建议；SUPERSEDED = 被后续决策或说明覆盖（�
 | 038 | 2026-10-09 | 在线采集器持续发现话题，`/tf_static`（及 `/map`）用 transient_local 订阅 | **ACCEPTED（四轮复审 P2）**：先启动实车再采集时 volatile 订阅收不到静态外参；新增 `onsite_late_inputs` 场景与 `check_onsite_report.py` |
 | 039 | 2026-10-09 | 断流/恢复验证用影子专用可暂停输入闸门，不重启、不停实车节点 | **ACCEPTED（四轮复审 P2）**：`input_gate:=true` + `onsite_pause_inputs.py`；闸门发 `test/fault_marker`，判据按实际事件时刻计延迟；场景 `input_pause_gate` |
 | 041 | 2026-10-09 | 里程计消息已在规划系时直接用其位姿，不查同 stamp 的动态 TF | **ACCEPTED（实车发现）**：RM `TfTransformer::odom_callback` 先发 odom、后广播 `odom→base_link`；按消息时刻查只能拿到上一周期样本，`tf_future_tolerance=0.05` 下每帧被拒 → `health_ok` 恒 false。新增 `odom_in_planning_frame`（默认 true）+ 静态 TF 修正参考点；未改 RM |
+| 043 | 2026-10-10 | 点云变换由适配层自己做，输出只含 xyz 的密集云；不再用 `do_transform_cloud` | **ACCEPTED（现场发现）**：现场 `/cloud_registered` 为 PCL 风格 48 字节布局（字段间有空洞），`tf2_sensor_msgs.do_transform_cloud()` 报 `PointFields and structured NumPy array dtype do not match` 并整帧被拒。改为按字段偏移解析 + numpy 刚体变换 + 输出 `point_step=12` 的 xyz 云 |
+| 044 | 2026-10-10 | `.rviz` 必须随包安装，并在 launch/预检里显式检查 | **ACCEPTED（现场发现）**：`setup.py` 只装 `*.launch.py`/`*.yaml`，launch 却用 share 下的 `.rviz` 打开 RViz → `rviz2 -d <不存在>` 静默显示空界面。新增 `rviz_config` 回归场景与预检 |
 | 042 | 2026-10-09 | `tf_future_tolerance` 按实测周期取 0.15 s（原 0.05） | **ACCEPTED（实车发现）**：`/Odometry_transformed` 9.95 Hz → 周期 0.1005 s；`sensor_pose`/云路径对同一动态 TF 的固有偏差可达 0.1 s。查询偏差记录在 `tf.last_lookup_delay_s`，非静默放宽 |
 | 040 | 2026-10-09 | 录包必须校验落盘与消息数，异常返回非零 | **ACCEPTED（四轮复审 P2）**：`timeout --signal=INT` 收尾 + 检查 `metadata.yaml` 的 `message_count`；失败不再打印"录制结束" |
 

@@ -84,7 +84,17 @@ fi
 echo "   OK"
 
 echo
-echo "== 预检 3/3：真实控制入口当前发布者（仅供确认，影子不会接管）"
+echo "== 预检 3/4：RViz 配置是否已安装（缺了会静默打开空界面）"
+RVIZ_CFG="$(ros2 pkg prefix sentry_scan_adapter_cpp 2>/dev/null)/share/sentry_scan_adapter_cpp/launch/sentry_scan_shadow.rviz"
+if [[ ! -f "${RVIZ_CFG}" ]]; then
+  echo "   FAIL: 找不到 ${RVIZ_CFG}" >&2
+  echo "        先运行 scripts/build.sh 重新安装（setup.py 必须包含 launch/*.rviz）。" >&2
+  exit 1
+fi
+echo "   OK: ${RVIZ_CFG}"
+
+echo
+echo "== 预检 4/4：真实控制入口当前发布者（仅供确认，影子不会接管）"
 for topic in /cmd_vel /cmd_vel_remap /cmd_vel_nav; do
   publishers="$(ros2 topic info -v "${topic}" 2>/dev/null \
     | grep -E "Node name|Node namespace" | paste -sd' ' - || true)"
@@ -99,7 +109,7 @@ fi
 
 echo
 echo "== 启动影子入口（本终端保持前台运行）"
-exec ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py \
+exec ros2 launch sentry_scan_adapter_cpp sentry_scan_shadow.launch.py \
   planning_frame:="${PLANNING_FRAME}" \
   odom_topic:="${ODOM_TOPIC}" \
   velocity_topic:="${VELOCITY_TOPIC}" \

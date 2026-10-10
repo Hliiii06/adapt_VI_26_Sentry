@@ -142,10 +142,13 @@ MCU/固件侧的"速度命令超时自动归零"时限**仍 UNKNOWN**，接管�
   校验 `row_step ≥ width·point_step`、`len(data) ≥ height·row_step`、字段偏移在 `point_step` 内；
   其他格式（大端、FLOAT64 等）**显式拒绝**而不是误读；至少有 `min_valid_points`（默认 10）个
   有限 xyz 点，全 NaN 云按无效输入拒绝；
-- **行填充先重排再变换**：`row_step > width·point_step` 的云会先按**每行起始地址**重排为密集布局，
-  再交给 TF 变换。原因：本环境安装的 `tf2_sensor_msgs.do_transform_cloud()` 按连续 `point_step`
-  遍历 `width*height` 个点，读端若沿用输入布局就会把填充字节当成点、并丢掉真实点。
-  适配层不接受这种不确定性：检查、重排、变换、输出都有单测覆盖（含填充区写 90 的样例）。
+- **点云变换由适配层自己做（2026-10-10 现场修正）**：按**字段自身偏移**解析 xyz（字段间空洞、
+  行填充都安全），用 numpy 做刚体变换，输出**只含 xyz 的密集云**（`point_step=12`）。
+  **不再调用** `tf2_sensor_msgs.do_transform_cloud()`：现场 `/cloud_registered` 是 PCL 风格
+  48 字节布局（`x@0 y@4 z@8 normal_*@16..24 intensity@32 curvature@36`），
+  该函数会抛 `PointFields and structured NumPy array dtype do not match` 并整帧被拒。
+  输出统一为 xyz 也就同时解决了行填充与"是否把填充当点"的问题（单测覆盖：行填充、
+  真实 48 字节布局、大端/FLOAT64/截断拒绝）。
 - TF 必须存在（`require_tf=true`），否则该帧拒绝；
 - `map→odom` 平移 > 0.5 m 或旋转 > 0.35 rad 判为**定位跳变**，默认**锁止到整组重启**
   （`jump_latch_duration=0`）。

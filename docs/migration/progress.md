@@ -3,6 +3,35 @@
 当前状态与最近变更。逐轮流水（S0–S3、Codex 各轮复审、修复过程）已移入
 [进展历史](../archive/progress_history.md)，失败证据与“用户验证/本轮实测”区别原样保留。
 
+## 2026-10-10（第二轮）：运行路径全 C++ 化（进行中）
+
+用户决定：**不再需要 Python 实现**，运行路径全部改为 C++。
+
+- 新增 ament_cmake 包 `src/sentry_scan_adapter_cpp/`，端口 5 个节点：
+  `rm_input_adapter`（PCL 读云，原生支持现场 48 字节 PCL 布局）、`cmd_gate`、
+  `task_adapter`、`shadow_guard`、`input_pause_gate`；launch/config/rviz 一并迁入。
+- **删除** Python 包 `src/sentry_scan_adapter/`（含其 3 个 Python 单测脚本）。
+- 命令闸门互锁矩阵改为 C++ gtest：`build/sentry_scan_adapter_cpp/test_cmd_gate_logic` **11/11 通过**
+  （默认不输出/需授权/限幅/候选超时/不健康/地图过期/NaN/取消清除使能/允许 wz）。
+- C++ 适配层已单独验证：`cpp_livox_cloud`（现场真实 48 字节布局）健康 + 候选速度 1.00 m/s。
+- **未决**：全 C++ 栈下 `mode1_goal` 健康为真但无运动 —— fake 已发出 `/sentry_scan/task/goal_in`、
+  订阅计数也匹配，但 C++ `task_adapter` 未收到该消息（无任何拒绝日志）。需再排查
+  （QoS/discovery/话题解析）。因此**纯 C++ 全链路尚未验收**，36 场景矩阵也未在 C++ 栈上重跑。
+
+## 2026-10-10：现场第二次故障（云被拒 + RViz 空白）修复
+
+- 现场 `start_rviz:=true` 后 RViz 空白，适配器持续 `cloud rejected: PointFields and structured
+  NumPy array dtype do not match`：真实 `/cloud_registered` 是 **PCL 风格 48 字节布局**
+  （`x@0 y@4 z@8 normal_*@16..24 intensity@32 curvature@36`，字段间有空洞），
+  `do_transform_cloud()` 无法处理。
+  → 改为适配层自己做变换并输出**只含 xyz 的密集云**（`point_step=12`）；单测覆盖真实 48 字节布局、
+  行填充、大端/FLOAT64/截断拒绝；新增场景 `livox_cloud`（健康+运动、无云拒绝）。
+- RViz 空白根因：`setup.py` 只安装 `*.launch.py`/`*.yaml`，**`.rviz` 从未安装**，而 launch 用
+  share 下该文件启动 RViz → 空显示列表。
+  → `setup.py` 安装 `launch/*.rviz`；launch 缺失时 `[WARN]`；`run_shadow_onsite.sh` 预检报错；
+  新增 `rviz_config` 回归场景。
+- 本轮仍是只读影子；未启动实车节点、未发布底盘命令。
+
 ## 2026-10-09（第二轮）：实车采集根因定位与修复
 
 - 在本机直接读原始采集目录后定位 `health_ok=False` 根因：RM `TfTransformer::odom_callback`

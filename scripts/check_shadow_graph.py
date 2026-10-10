@@ -3,7 +3,7 @@
 
 用法（同一 ROS_DOMAIN_ID 下，影子 launch 已在运行）：
 
-    ros2 run sentry_scan_adapter check_inputs ...   # 输入侧健康
+    ros2 run sentry_scan_adapter_cpp check_inputs ...   # 输入侧健康
     python3 scripts/check_shadow_graph.py --duration 6 --expect-unhealthy
 
 检查项：

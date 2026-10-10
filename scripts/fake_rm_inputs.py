@@ -18,6 +18,9 @@
                              再广播**同 stamp** 的 odom→base_link（动态 TF 晚于消息到达）
     --tf-delay-after-odom N  配合 --tf-after-odom：把动态 TF 延后 N 秒发布（默认 0.0），
                              用来稳定复现"查询时 TF 还没进 buffer"（实车受调度/DDS 影响）
+    --livox-cloud            用**现场真实布局**发布 /cloud_registered：
+                             point_step=48，x@0 y@4 z@8 normal_*@16..24 intensity@32 curvature@36
+                             （字段间有空洞；do_transform_cloud 无法处理这种 dtype）
     --padded-cloud           发布带行填充的点云（point_step=16、row_step>width*point_step，
                              填充区写 (90,90,90)），用于验证适配层会先重排为密集布局
     --fake-map-heartbeat-until / --fake-map-heartbeat-resume
@@ -220,6 +223,31 @@ class FakeRmInputs(Node):
         msg.is_dense = False
         return msg
 
+    def build_livox_cloud(self, header):
+        """复现现场 /cloud_registered 的 PCL 风格 48 字节布局（字段间有空洞）。"""
+        fields = [PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1)
+                  for name, offset in (("x", 0), ("y", 4), ("z", 8), ("normal_x", 16),
+                                       ("normal_y", 20), ("normal_z", 24), ("intensity", 32),
+                                       ("curvature", 36))]
+        data = bytearray()
+        for x, y, z in self.cloud_points:
+            body = bytearray(48)
+            struct.pack_into("<fff", body, 0, x, y, z)
+            struct.pack_into("<fff", body, 16, 0.0, 0.0, 1.0)
+            struct.pack_into("<f", body, 32, 0.5)
+            struct.pack_into("<f", body, 36, 0.1)
+            data += bytes(body)
+        msg = PointCloud2()
+        msg.header = header
+        msg.height, msg.width = 1, len(self.cloud_points)
+        msg.fields = fields
+        msg.is_bigendian = False
+        msg.point_step = 48
+        msg.row_step = 48 * msg.width
+        msg.data = bytes(data)
+        msg.is_dense = True
+        return msg
+
     @staticmethod
     def build_room_cloud():
         """四面墙（不含地面），给 SCAN 划出自由空间。"""
@@ -315,7 +343,10 @@ class FakeRmInputs(Node):
         if self.args.nan_cloud_after and elapsed > self.args.nan_cloud_after:
             self.mark("nan_cloud")
             points = [(float("nan"), float("nan"), float("nan"))] * len(self.cloud_points)
-        if self.args.padded_cloud and not (self.args.nan_cloud_after
+        if self.args.livox_cloud and not (self.args.nan_cloud_after
+                                          and elapsed > self.args.nan_cloud_after):
+            self.cloud_pub.publish(self.build_livox_cloud(header))
+        elif self.args.padded_cloud and not (self.args.nan_cloud_after
                                            and elapsed > self.args.nan_cloud_after):
             self.mark("padded_cloud")
             self.cloud_pub.publish(self.build_padded_cloud(header))
@@ -404,6 +435,7 @@ def main(argv=None):
     parser.add_argument("--stop-tf-after", type=float, default=0.0)
     parser.add_argument("--mismatch-pairing", action="store_true")
     parser.add_argument("--padded-cloud", action="store_true")
+    parser.add_argument("--livox-cloud", action="store_true")
     parser.add_argument("--tf-after-odom", action="store_true")
     parser.add_argument("--tf-delay-after-odom", type=float, default=0.0)
     parser.add_argument("--resume-cloud-after", type=float, default=0.0)

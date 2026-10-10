@@ -81,7 +81,7 @@ def _namespace_params(yaml_path, node_name, overrides):
 
 
 def _setup(context):
-    adapter_share = get_package_share_directory("sentry_scan_adapter")
+    adapter_share = get_package_share_directory("sentry_scan_adapter_cpp")
     scan_share = get_package_share_directory("scan_planner")
     contract_yaml = os.path.join(adapter_share, "config", "shadow_contract.yaml")
     planner_yaml = os.path.join(scan_share, "config", "sentry_planner.yaml")
@@ -138,6 +138,7 @@ def _setup(context):
     log_dir = os.path.expanduser(value("shadow_log_dir"))
 
     input_gate = _as_bool(value("input_gate"))
+    cmd_gate_enabled = _as_bool(value("cmd_gate"))
     # input_gate:=true 时，适配器改为消费闸门输出；闸门只读实车话题，用于现场验证断流/恢复。
     if input_gate:
         adapter_odom = "test/odom"
@@ -153,7 +154,8 @@ def _setup(context):
         LogInfo(msg="SHADOW MODE (no chassis output): adapter -> SCAN -> candidate velocity; "
                     "shadow_guard only records cmd_vel_shadow. No UART/Nav2/LIO/simulator started."),
         Node(
-            package="sentry_scan_adapter", executable="rm_input_adapter", name="rm_input_adapter",
+            package="sentry_scan_adapter_cpp", executable="rm_input_adapter",
+            name="rm_input_adapter",
             namespace=NAMESPACE, output="screen",
             parameters=[contract_yaml, common, {
                 "planning_frame": planning_frame, "task_frame": task_frame,
@@ -211,7 +213,7 @@ def _setup(context):
             remappings=[("cmd_vel", "cmd_vel_candidate")],
         ),
         Node(
-            package="sentry_scan_adapter", executable="shadow_guard", name="shadow_guard",
+            package="sentry_scan_adapter_cpp", executable="shadow_guard", name="shadow_guard",
             namespace=NAMESPACE, output="screen",
             parameters=[contract_yaml, common, {
                 "log_dir": log_dir,
@@ -220,7 +222,7 @@ def _setup(context):
             }],
         ),
         Node(
-            package="sentry_scan_adapter", executable="input_pause_gate", name="input_pause_gate",
+            package="sentry_scan_adapter_cpp", executable="input_pause_gate", name="input_pause_gate",
             namespace=NAMESPACE, output="screen",
             parameters=[contract_yaml, common, {
                 "odom_in": value("odom_topic"),
@@ -230,7 +232,20 @@ def _setup(context):
         ) if input_gate else LogInfo(msg="input_gate:=false (断流/恢复验证不可用；"
                                          "用 input_gate:=true 启动可暂停的影子输入)"),
         Node(
-            package="sentry_scan_adapter", executable="task_adapter", name="task_adapter",
+            package="sentry_scan_adapter_cpp", executable="cmd_gate", name="cmd_gate",
+            namespace=NAMESPACE, output="screen",
+            parameters=[common, {
+                "candidate_topic": "cmd_vel_candidate",
+                "output_topic": value("gate_output_topic"),
+                "max_vx": float(value("gate_max_vx")),
+                "max_vy": float(value("gate_max_vy")),
+                "max_wz": float(value("gate_max_wz")),
+                "allow_wz": _as_bool(value("gate_allow_wz")),
+            }],
+        ) if cmd_gate_enabled else LogInfo(
+            msg="cmd_gate:=false (命令闸门未启用；接管测试必须显式启用并设置限幅)"),
+        Node(
+            package="sentry_scan_adapter_cpp", executable="task_adapter", name="task_adapter",
             namespace=NAMESPACE, output="screen",
             parameters=[contract_yaml, common, {"planning_frame": planning_frame}],
         ),
@@ -246,6 +261,11 @@ def _setup(context):
             parameters=[_params_from_file(reference_path_file), common],
         ))
 
+    if start_rviz and not os.path.exists(rviz_config):
+        # 不静默失败：配置缺失时 rviz2 会打开一个空显示列表，很难排查。
+        print("[WARN] start_rviz:=true 但找不到 RViz 配置: %s\n"
+              "       请先 `scripts/build.sh` 重新安装（setup.py 需包含 launch/*.rviz）；"
+              "或先用 start_rviz:=false 启动。" % rviz_config)
     if start_rviz:
         nodes.append(Node(
             package="rviz2", executable="rviz2", name="rviz2", namespace=NAMESPACE,
@@ -298,6 +318,14 @@ def generate_launch_description():
         DeclareLaunchArgument("max_map_age", default_value="0.5",
                               description="心跳超过该时间影子输出归零"),
         DeclareLaunchArgument("start_rviz", default_value="false"),
+        DeclareLaunchArgument("cmd_gate", default_value="false",
+                              description="true = 启动命令闸门（默认禁止输出，需显式使能）"),
+        DeclareLaunchArgument("gate_output_topic", default_value="cmd_vel_gated",
+                              description="闸门输出话题；默认不是 /cmd_vel，误启动不会驱动底盘"),
+        DeclareLaunchArgument("gate_max_vx", default_value="0.0"),
+        DeclareLaunchArgument("gate_max_vy", default_value="0.0"),
+        DeclareLaunchArgument("gate_max_wz", default_value="0.0"),
+        DeclareLaunchArgument("gate_allow_wz", default_value="false"),
         DeclareLaunchArgument("input_gate", default_value="false",
                               description="true = 在实车话题与适配器之间插入可暂停的输入闸门"
                                           "（现场断流/恢复验证；只影响 /sentry_scan）"),
