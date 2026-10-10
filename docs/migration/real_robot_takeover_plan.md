@@ -66,6 +66,32 @@ SCAN 跟踪器 ──/sentry_scan/cmd_vel_candidate──> 命令闸门 ──> 
    原地小幅验证一次（用户操作）；
 4. 记录：切换前后发布者名单、时间、执行人。
 
+## 三点五、影子成功后的最短平地低速步骤（待批准，未执行）
+
+前置：静止影子验证 A–F 全部通过（health True、云/包络/机体对齐、标准入口产生路径与候选速度、
+`/cmd_vel` 上无影子发布者）。**任一条不满足就不进入本节。**
+
+1. `ros2 topic info -v /cmd_vel` 记录启动前发布者名单（现场实测：`controller_server` + `behavior_server`）；
+2. 停掉导航栈的 `controller_server`/`behavior_server` 发布（lifecycle deactivate 或停其 launch），
+   再次确认 `/cmd_vel` 发布者名单为空；
+3. 用**小限幅**并显式使能命令闸门（示例，数值待你确认）：
+
+```bash
+bash scripts/run_shadow_onsite.sh cmd_gate:=true gate_output_topic:=/cmd_vel \
+  gate_max_vx:=0.2 gate_max_vy:=0.2 gate_max_wz:=0.0 gate_allow_wz:=false start_rviz:=true
+python3 scripts/cmd_gate_control.py --enable
+bash scripts/onsite_check_safety.sh motion       # 闸门输出限幅生效
+```
+
+4. 安全员站在急停旁，按 T1→T3 顺序：直行 1 m 停 → 横移 1 m 停 → 直行中取消；
+5. 出现方向反、抖动、超调、未停住 → 立即急停并回传日志；
+6. 退出：`python3 scripts/cmd_gate_control.py --disable` → Ctrl-C → 恢复原导航 → 确认 `/cmd_vel` 发布者恢复。
+
+**必须现场确认的停车条件**（缺一不进入低速）：① 急停触发方式（已确认存在、可立即停车）；
+② MCU 在速度停发后多久归零（**UNKNOWN**，必须实测）；③ `cmd_gate` 进程被杀或节点崩溃时的停车表现；
+④ `planning/reset`/任务取消后的停车时限；⑤ `health_ok=false`/地图停更后的停车时限。
+以上每条都要有实测数字，不能引用仿真值。
+
 ## 四、首轮低速测试步骤（全部需用户确认后执行）
 
 前提：在线影子已通过 §8 的 7 个问题的检查（输入对齐、地图更新、路径不穿墙穿地、失效行为、

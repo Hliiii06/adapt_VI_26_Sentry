@@ -96,6 +96,81 @@ python3 scripts/check_onsite_report.py --report log/onsite/<时间戳>/report.js
 
 ---
 
+## 0.5 静止影子验证（C++ 版本，现场按序执行）
+
+> 运行链全 C++：`rm_input_adapter` / `task_adapter` / `reference_path_publisher` / `shadow_guard` /
+> `input_pause_gate` / `cmd_gate`；SCAN 本体同为 C++。命令闸门默认关闭（`cmd_gate:=false`）。
+
+**A. 人工核对安装路径（防止误加载旧安装）**
+
+```bash
+cd ~/adapt_VI_26_Sentry && git pull && scripts/build.sh
+source /opt/ros/humble/setup.bash && source install/setup.bash
+ros2 pkg prefix sentry_scan_adapter_cpp     # 必须是 <仓库>/install/sentry_scan_adapter_cpp
+ros2 pkg prefix scan_planner                # 必须是 <仓库>/install/scan_planner
+ls install/ | grep -x sentry_scan_adapter   # 必须无输出（Python 包已删除）
+ros2 pkg executables sentry_scan_adapter_cpp
+# 期望：cmd_gate input_pause_gate reference_path_publisher rm_input_adapter shadow_guard task_adapter
+git -C . rev-parse --short HEAD             # 记录提交号
+```
+
+**B. 人工核对消息与时间戳（机器人静止，只读）**
+
+```bash
+python3 scripts/onsite_inspect.py --duration 20
+# 看 log/onsite/<ts>/report.txt 的"关键话题"表：
+#   /Odometry_transformed  frame=odom          stamp_age 应与 recv_age 同量级（<0.5s）
+#   /LIVO2/imu_propagate   frame=world         stamp_age 极小；world 不在 TF 中 → 速度将降级为零（设计内）
+#   /cloud_registered      frame=camera_init   9Hz 左右；point_step 应为 48（PCL 风格，已支持）
+#   TF：odom→base_link（动态）、odom→camera_init（静态单位）
+python3 scripts/onsite_check_report_stamp.py 2>/dev/null || true   # 若脚本不存在，以上表为准
+```
+
+**C. 启动影子 + RViz（本终端前台，Ctrl-C 退出）**
+
+```bash
+bash scripts/run_shadow_onsite.sh start_rviz:=true
+# 预检会打印：规划系=odom、车高=0.15、半径=0.26，以及 RViz 配置是否已安装
+```
+
+**D. 确认输入健康**
+
+```bash
+bash scripts/onsite_diagnose.sh
+# 期望：health_ok=True；odom.pose_source=message(child=base_footprint+static)
+#       cloud.input_layout=point_step=48,...；odom.velocity=velocity_frame_unresolved(world)（正常）
+# 任一路径/字段不符，把"原因:"原文回传，不要继续
+```
+
+**E. RViz 对齐检查（不发目标）**
+
+Fixed Frame = `odom`。确认三项重合：真实云 `/cloud_registered`、适配云 `/sentry_scan/cloud`、
+包络 `/sentry_scan/self_inflation` + 机体箭头 `/Odometry_transformed`。
+**截图**，并在图里读包络中心与雷达原点的相对位置（这决定几何参考点是否可信）。
+
+**F. 从标准入口发目标（RViz 的 2D Goal Pose，已指向 `/sentry_scan/task/goal_in`）**
+
+- 在**可见空旷处**点一个 1.5–2.5 m 远、避开障碍的目标；
+- 期望：RViz 出现 `/sentry_scan/global_list`/`optimal_list`（路径）与 `/sentry_scan/goal_point`；
+- 另一个终端确认**候选速度流通**：
+
+```bash
+ros2 topic hz /sentry_scan/cmd_vel_candidate
+timeout 3 ros2 topic echo --once /sentry_scan/cmd_vel_candidate
+ros2 topic hz /sentry_scan/cmd_vel_shadow      # shadow_guard 记录用（车辆不动，正常）
+bash scripts/onsite_check_safety.sh motion     # 图隔离 + 候选速度 + 未定义分量恒零
+ros2 topic info -v /cmd_vel                    # 发布者必须仍是原有导航，绝不能出现 /sentry_scan/*
+```
+
+**G. 记录与退出**
+
+```bash
+bash scripts/onsite_record.sh 120              # 可选：录 health/心跳/候选/影子/输入/TF
+# 影子终端 Ctrl-C；随后
+ros2 node list | grep sentry_scan              # 应无输出
+ros2 topic info -v /cmd_vel                    # 与启动前一致
+```
+
 ## 1. 保持原有实车系统正常启动
 
 按现场原有流程启动（例如 `relocal_nav.sh` 或你们惯用的终端组合），确认：
