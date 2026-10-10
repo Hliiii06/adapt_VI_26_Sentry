@@ -1,0 +1,1 @@
+/home/hzq/nav/adapt_VI_26_Sentry/build_cpp/scan_planner_msgs/ament_cmake_environment_hooks/local_setup.zsh

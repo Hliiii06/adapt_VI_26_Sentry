@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "scan_planner_msgs__rs",
+		"source" : "/home/hzq/nav/adapt_VI_26_Sentry/build_cpp/scan_planner_msgs/scan_planner_msgs__rs"
+	}
+}

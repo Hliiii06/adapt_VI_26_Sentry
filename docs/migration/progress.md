@@ -14,9 +14,28 @@
 - 命令闸门互锁矩阵改为 C++ gtest：`build/sentry_scan_adapter_cpp/test_cmd_gate_logic` **11/11 通过**
   （默认不输出/需授权/限幅/候选超时/不健康/地图过期/NaN/取消清除使能/允许 wz）。
 - C++ 适配层已单独验证：`cpp_livox_cloud`（现场真实 48 字节布局）健康 + 候选速度 1.00 m/s。
-- **未决**：全 C++ 栈下 `mode1_goal` 健康为真但无运动 —— fake 已发出 `/sentry_scan/task/goal_in`、
-  订阅计数也匹配，但 C++ `task_adapter` 未收到该消息（无任何拒绝日志）。需再排查
-  （QoS/discovery/话题解析）。因此**纯 C++ 全链路尚未验收**，36 场景矩阵也未在 C++ 栈上重跑。
+- **已修（2026-10-10 第二轮）**：全 C++ 栈 `mode1_goal` 无运动的根因是 **C++ `shadow_guard` 与
+  `input_pause_gate` 的订阅对象没有被成员变量持有** —— rclcpp 的订阅由返回的 shared_ptr 拥有，
+  构造结束即丢弃会让订阅失效，于是 guard 收不到 `health_ok`/`cmd_vel_candidate`/`grid_map/cloud_update`，
+  恒判 `map_update_stale`、输出零（而适配层健康为真，容易误判链路）。
+  修复：所有订阅/定时器显式用成员持有；`task_adapter`/`rm_input_adapter`/`cmd_gate` 复核为已持有。
+  修复后可归属诊断：门控 73 次 `pass`、`max|out_vx|=0.999`，`goal_in → task_adapter → goal → FSM →
+  规划 → 跟踪器 → cmd_vel_candidate → shadow_guard → cmd_vel_shadow` 全链贯通。
+- Mode 3 参考路线发布器已从 Python（`scan_planner/scripts/reference_path_publisher.py`）
+  移植为 C++（`sentry_scan_adapter_cpp/reference_path_publisher`），launch 改指向 C++ 版本。
+- 运行链语言现状：`rm_input_adapter`/`task_adapter`/`shadow_guard`/`input_pause_gate`/`cmd_gate`/
+  `reference_path_publisher` 全部 C++；SCAN 本体（`scan_planner_node`/`closed_loop_controller`）为 C++；
+  仅保留 Python launch 与离线采集/判据/分析脚本。
+- **纯 C++ 栈关键回归 14/14 通过**（`log/shadow/cppmatrix.log` + 修复后重跑）：
+  `mode1_goal`、`mode2_waypoints`、`mode3_path`、`livox_cloud`、`padded_cloud`、
+  `task_frame_transform`、`cancel`、`input_pause_gate`、`map_gate`、`recovery_no_resume`、
+  `nav2_coexist`、`odom_before_tf`、`no_inputs`、`cmd_gate`；闸门 gtest 11/11。
+- 另修两项移植遗漏：随 Python 包被删的两个测试 YAML（`shadow_test_waypoints.yaml`、
+  `shadow_test_reference_path.yaml`）已恢复到 C++ 包 `config/`；
+  C++ `task_adapter` 的空/未知 frame 拒绝日志措辞与既有反例判据对齐（保留原覆盖，未删测试）。
+- **未完成**：隔离 install（`install_cpp/`）只单独构建了适配包，端到端链路在隔离目录下尚未跑通
+  （无 guard CSV），需在下一步补齐；`docs/testing/shadow_acceptance.md` 仍是 Python 时代的场景描述，
+  待按 C++ 版本重写。
 
 ## 2026-10-10：现场第二次故障（云被拒 + RViz 空白）修复
 

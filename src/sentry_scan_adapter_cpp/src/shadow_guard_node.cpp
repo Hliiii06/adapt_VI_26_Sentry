@@ -46,15 +46,26 @@ class ShadowGuard : public rclcpp::Node {
     log_dir_ = declare_parameter<std::string>("log_dir", "log/shadow");
 
     auto latch = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
-    create_subscription<std_msgs::msg::Bool>(health_topic_, latch,
+    // 必须用成员变量持有：rclcpp 的订阅/定时器由返回的 shared_ptr 拥有，
+    // 构造结束即丢弃会让订阅失效（曾导致 guard 收不到 health/心跳，恒判 map_update_stale）。
+    health_sub_ = create_subscription<std_msgs::msg::Bool>(
+        health_topic_, latch,
         [this](std_msgs::msg::Bool::SharedPtr msg) { health_ = msg->data; health_recv_ = now_s(); });
-    create_subscription<geometry_msgs::msg::Twist>(candidate_topic_, 10,
-        [this](geometry_msgs::msg::Twist::SharedPtr msg) { candidate_ = *msg; candidate_recv_ = now_s(); });
-    create_subscription<nav_msgs::msg::Odometry>(body_pose_topic_, 10,
+    candidate_sub_ = create_subscription<geometry_msgs::msg::Twist>(
+        candidate_topic_, 10, [this](geometry_msgs::msg::Twist::SharedPtr msg) {
+          candidate_ = *msg;
+          candidate_recv_ = now_s();
+        });
+    body_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+        body_pose_topic_, 10,
         [this](nav_msgs::msg::Odometry::SharedPtr) { body_recv_ = now_s(); });
-    create_subscription<std_msgs::msg::Header>(cloud_update_topic_, 10,
-        [this](std_msgs::msg::Header::SharedPtr) { map_recv_ = now_s(); map_ever_fresh_ = true; });
-    create_subscription<scan_planner_msgs::msg::TaskAuthorization>(task_active_topic_, latch,
+    map_sub_ = create_subscription<std_msgs::msg::Header>(
+        cloud_update_topic_, 10, [this](std_msgs::msg::Header::SharedPtr) {
+          map_recv_ = now_s();
+          map_ever_fresh_ = true;
+        });
+    task_sub_ = create_subscription<scan_planner_msgs::msg::TaskAuthorization>(
+        task_active_topic_, latch,
         [this](scan_planner_msgs::msg::TaskAuthorization::SharedPtr msg) { on_task(msg); });
 
     shadow_pub_ = create_publisher<geometry_msgs::msg::Twist>(shadow_topic_, 10);
@@ -232,6 +243,11 @@ class ShadowGuard : public rclcpp::Node {
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr shadow_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr reset_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr health_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr candidate_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr body_sub_;
+  rclcpp::Subscription<std_msgs::msg::Header>::SharedPtr map_sub_;
+  rclcpp::Subscription<scan_planner_msgs::msg::TaskAuthorization>::SharedPtr task_sub_;
 };
 
 }  // namespace sentry_scan_adapter_cpp

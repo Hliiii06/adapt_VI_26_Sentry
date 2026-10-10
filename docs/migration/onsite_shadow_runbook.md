@@ -55,7 +55,7 @@ cd <本仓库>
 
 # 每个新终端都要先 source；Python 工具（采集/发目标/暂停）依赖这些环境变量
 source /opt/ros/humble/setup.bash
-scripts/build.sh                              # 10 个包（SCAN 9 + sentry_scan_adapter）
+scripts/build.sh                              # 10 个包（SCAN 9 + sentry_scan_adapter_cpp；运行链全 C++）
 source install/setup.bash                     # 让本仓库包与消息类型可见
 
 # 保持原有实车系统正常运行，然后采集"实际在跑什么"
@@ -116,7 +116,7 @@ bash scripts/run_shadow_onsite.sh start_rviz:=true # 正式启动（前台；Ctr
 ```
 
 现场入口自带实车包络默认值（半径 **0.26 m**、高 **0.15 m**，用户 2026-10-09 确认，`safety_margin=0`）。
-**不要**直接 `ros2 launch sentry_scan_adapter sentry_scan_shadow.launch.py`：launch 自身默认是通用值
+**不要**直接 `ros2 launch sentry_scan_adapter_cpp sentry_scan_shadow.launch.py`：launch 自身默认是通用值
 `robot_height=0.25`（仿真/回归用）。
 
 > `start_rviz` 默认是 **false**：要按第 3 节在 RViz 里对齐，必须显式加 `start_rviz:=true`。

@@ -27,19 +27,20 @@ class InputPauseGate : public rclcpp::Node {
     resume_after_ = declare_parameter<double>("resume_after", 0.0);
 
     const auto qos = rclcpp::SensorDataQoS();
-    create_subscription<nav_msgs::msg::Odometry>(odom_in_, qos,
+    // 订阅必须由成员持有（否则构造结束即失效）
+    odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(odom_in_, qos,
         [this](nav_msgs::msg::Odometry::SharedPtr msg) {
           if (paused_) { dropped_++; return; } forwarded_++; odom_pub_->publish(*msg);
         });
-    create_subscription<nav_msgs::msg::Odometry>(velocity_in_, qos,
+    velocity_sub_ = create_subscription<nav_msgs::msg::Odometry>(velocity_in_, qos,
         [this](nav_msgs::msg::Odometry::SharedPtr msg) {
           if (paused_) { dropped_++; return; } forwarded_++; velocity_pub_->publish(*msg);
         });
-    create_subscription<sensor_msgs::msg::PointCloud2>(cloud_in_, qos,
+    cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(cloud_in_, qos,
         [this](sensor_msgs::msg::PointCloud2::SharedPtr msg) {
           if (paused_) { dropped_++; return; } forwarded_++; cloud_pub_->publish(*msg);
         });
-    create_subscription<std_msgs::msg::Bool>(pause_topic_, 10,
+    pause_sub_ = create_subscription<std_msgs::msg::Bool>(pause_topic_, 10,
         [this](std_msgs::msg::Bool::SharedPtr msg) { set_paused(msg->data, "operator command"); });
 
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_out_, qos);
@@ -103,6 +104,9 @@ class InputPauseGate : public rclcpp::Node {
   rclcpp::Publisher<std_msgs::msg::Header>::SharedPtr marker_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr paused_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_, velocity_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_;
 };
 
 }  // namespace sentry_scan_adapter_cpp

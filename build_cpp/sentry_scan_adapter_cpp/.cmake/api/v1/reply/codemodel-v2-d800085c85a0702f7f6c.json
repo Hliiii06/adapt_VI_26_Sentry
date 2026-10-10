@@ -1,0 +1,184 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-2cb2fa3f662aa38d9ca8.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10
+					]
+				},
+				{
+					"build" : "gtest",
+					"jsonFile" : "directory-gtest-a2408fe1a73b92c5e636.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.8"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 1,
+					"source" : "/opt/ros/humble/src/gtest_vendor",
+					"targetIndexes" : 
+					[
+						1,
+						2
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"childIndexes" : 
+					[
+						1
+					],
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "sentry_scan_adapter_cpp",
+					"targetIndexes" : 
+					[
+						0,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						1
+					],
+					"name" : "gtest",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						1,
+						2
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "cmd_gate::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-cmd_gate-554486ddc8ca8304e4a6.json",
+					"name" : "cmd_gate",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "gtest::@0af4add9fe94340e763e",
+					"jsonFile" : "target-gtest-c58104cde6b75b514d6e.json",
+					"name" : "gtest",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "gtest_main::@0af4add9fe94340e763e",
+					"jsonFile" : "target-gtest_main-2eebc44f275d19aee63f.json",
+					"name" : "gtest_main",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "input_pause_gate::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-input_pause_gate-9dcdada604386f3b8407.json",
+					"name" : "input_pause_gate",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "reference_path_publisher::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-reference_path_publisher-2e741a45117544850e8f.json",
+					"name" : "reference_path_publisher",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "rm_input_adapter::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-rm_input_adapter-42d5f552bd299dad357f.json",
+					"name" : "rm_input_adapter",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "sentry_scan_adapter_cpp_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-sentry_scan_adapter_cpp_uninstall-bbefd21c76400560350d.json",
+					"name" : "sentry_scan_adapter_cpp_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "shadow_guard::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-shadow_guard-ddd3cf2305570439098c.json",
+					"name" : "shadow_guard",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "task_adapter::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-task_adapter-11f81a3ec87114c78deb.json",
+					"name" : "task_adapter",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "test_cmd_gate_logic::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-test_cmd_gate_logic-7c04a50f86c289e14ce5.json",
+					"name" : "test_cmd_gate_logic",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-93cec85fe7bab0676076.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/hzq/nav/adapt_VI_26_Sentry/build_cpp/sentry_scan_adapter_cpp",
+		"source" : "/home/hzq/nav/adapt_VI_26_Sentry/src/sentry_scan_adapter_cpp"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

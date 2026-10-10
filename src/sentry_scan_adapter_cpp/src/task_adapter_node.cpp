@@ -83,8 +83,9 @@ class TaskAdapter : public rclcpp::Node {
       if (empty_frame_is_planning_) {
         return std::nullopt;  // 空 frame 视为规划系（调用方不再变换）
       }
-      RCLCPP_WARN(get_logger(), "%s rejected: empty frame_id (set empty_frame_is_planning only "
-                                "after confirming the publisher really uses the planning frame)",
+      RCLCPP_WARN(get_logger(),
+                  "%s rejected: empty header.frame_id (set empty_frame_is_planning only after "
+                  "confirming the publisher really uses the planning frame)",
                   what.c_str());
       return std::nullopt;
     }
@@ -112,8 +113,11 @@ class TaskAdapter : public rclcpp::Node {
         } catch (const tf2::TransformException &) {
         }
       }
-      RCLCPP_WARN(get_logger(), "%s rejected: no TF %s<-%s at %.3f: %s", what.c_str(),
-                  planning_frame_.c_str(), header.frame_id.c_str(), stamp, message.c_str());
+      RCLCPP_WARN(get_logger(),
+                  "%s rejected: cannot transform '%s' into '%s' at %.3f (no TF: %s); "
+                  "unknown frames are never passed through",
+                  what.c_str(), header.frame_id.c_str(), planning_frame_.c_str(), stamp,
+                  message.c_str());
       return std::nullopt;
     }
   }

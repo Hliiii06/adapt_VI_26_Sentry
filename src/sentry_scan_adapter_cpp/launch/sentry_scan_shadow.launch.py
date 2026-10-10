@@ -255,7 +255,7 @@ def _setup(context):
     # （grid_map.ground_grid_file 为空时的既有语义），真实初始位姿由输入决定。
     if navi_mode == 3:
         nodes.append(Node(
-            package="scan_planner", executable="reference_path_publisher.py",
+            package="sentry_scan_adapter_cpp", executable="reference_path_publisher",
             name="reference_path_publisher", namespace=NAMESPACE, output="screen",
             remappings=[("initial_path", "task/path_in")],
             parameters=[_params_from_file(reference_path_file), common],

@@ -1,0 +1,1 @@
+/home/hzq/nav/adapt_VI_26_Sentry/src/planner/scan_planner_msgs/msg/Bspline.msg

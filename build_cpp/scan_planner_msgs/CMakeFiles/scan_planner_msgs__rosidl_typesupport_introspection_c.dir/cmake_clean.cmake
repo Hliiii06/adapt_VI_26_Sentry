@@ -1,0 +1,21 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/scan_planner_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/bspline__type_support.c.o"
+  "CMakeFiles/scan_planner_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/bspline__type_support.c.o.d"
+  "CMakeFiles/scan_planner_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/data_disp__type_support.c.o"
+  "CMakeFiles/scan_planner_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/data_disp__type_support.c.o.d"
+  "CMakeFiles/scan_planner_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/task_authorization__type_support.c.o"
+  "CMakeFiles/scan_planner_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/task_authorization__type_support.c.o.d"
+  "libscan_planner_msgs__rosidl_typesupport_introspection_c.pdb"
+  "libscan_planner_msgs__rosidl_typesupport_introspection_c.so"
+  "rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/bspline__rosidl_typesupport_introspection_c.h"
+  "rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/bspline__type_support.c"
+  "rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/data_disp__rosidl_typesupport_introspection_c.h"
+  "rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/data_disp__type_support.c"
+  "rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/task_authorization__rosidl_typesupport_introspection_c.h"
+  "rosidl_typesupport_introspection_c/scan_planner_msgs/msg/detail/task_authorization__type_support.c"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang C)
+  include(CMakeFiles/scan_planner_msgs__rosidl_typesupport_introspection_c.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

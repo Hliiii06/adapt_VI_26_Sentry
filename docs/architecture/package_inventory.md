@@ -85,7 +85,7 @@ SCAN2 为原生 ROS2 ament/C++17；ROS1 对应工程为 catkin，不能把其 `c
 
 | package | 路径 | 职责 | 依赖 |
 |---|---|---|---|
-| sentry_scan_adapter | `src/sentry_scan_adapter` | RM→SCAN 影子输入适配、健康门控、影子保护与输入检查（ament_python） | rclpy、nav/sensor/geometry/std/diagnostic_msgs、tf2_ros、tf2_geometry_msgs、tf2_sensor_msgs、scan_planner_msgs |
+| sentry_scan_adapter_cpp | `src/sentry_scan_adapter_cpp` | **运行链（全 C++）**：RM→SCAN 输入适配、任务/路线转换、影子门控、断流闸门、命令闸门、参考路线发布（ament_cmake） | rclcpp、nav/sensor/geometry/std/diagnostic_msgs、tf2、tf2_ros、tf2_geometry_msgs、pcl_conversions、PCL、Eigen3、scan_planner_msgs |
 
 它只做适配与门控，**不含规划算法**，也不发布底盘命令；契约见
 [影子输入契约](../interfaces/shadow_input_contract.md)。

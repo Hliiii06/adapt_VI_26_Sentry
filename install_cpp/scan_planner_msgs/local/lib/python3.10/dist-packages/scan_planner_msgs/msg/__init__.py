@@ -1,0 +1,1 @@
+/home/hzq/nav/adapt_VI_26_Sentry/build_cpp/scan_planner_msgs/rosidl_generator_py/scan_planner_msgs/msg/__init__.py

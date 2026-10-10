@@ -1,0 +1,6 @@
+setup.py
+scan_planner_msgs/__init__.py
+scan_planner_msgs.egg-info/PKG-INFO
+scan_planner_msgs.egg-info/SOURCES.txt
+scan_planner_msgs.egg-info/dependency_links.txt
+scan_planner_msgs.egg-info/top_level.txt

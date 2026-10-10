@@ -44,7 +44,12 @@ add_executable(input_pause_gate src/input_pause_gate_node.cpp)
 ament_target_dependencies(input_pause_gate
   rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs)
 
+add_executable(reference_path_publisher src/reference_path_publisher_node.cpp)
+ament_target_dependencies(reference_path_publisher
+  rclcpp geometry_msgs nav_msgs)
+
 install(TARGETS rm_input_adapter cmd_gate task_adapter shadow_guard input_pause_gate
+                reference_path_publisher
   DESTINATION lib/${PROJECT_NAME})
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

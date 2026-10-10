@@ -1,0 +1,1 @@
+/home/hzq/nav/adapt_VI_26_Sentry/build_cpp/sentry_scan_adapter_cpp/ament_cmake_core/sentry_scan_adapter_cppConfig.cmake
